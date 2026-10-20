@@ -8213,6 +8213,28 @@ export default function ChatView(props: ChatViewProps) {
               }
             >
               <div ref={draftHeroTransitionGroupRef} className="chat-composer-lane w-full">
+                {/* Outside the composer stack on purpose: the stack takes pointer events
+                    across its full width, which made the strip beside the island a dead
+                    zone that swallowed wheel scrolling and clicks meant for the thread. */}
+                {sideQuestionParentKey !== null &&
+                sideQuestionParentRef !== null &&
+                !isDraftHeroState ? (
+                  <div className="mx-auto w-full max-w-(--chat-content-max-width)">
+                    <SideQuestionCard
+                      parentKey={sideQuestionParentKey}
+                      parentThreadRef={sideQuestionParentRef}
+                      environmentId={environmentId}
+                      shells={sideQuestionShells}
+                      markdownCwd={
+                        activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? undefined
+                      }
+                      timelineAtEnd={!showScrollToBottom}
+                      revealTarget={composerOverlayElement?.parentElement ?? null}
+                      onFork={forkSideQuestionStable}
+                      onDelete={deleteSideQuestionStable}
+                    />
+                  </div>
+                ) : null}
                 <div
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
@@ -8234,23 +8256,6 @@ export default function ChatView(props: ChatViewProps) {
                         />
                       </div>
                     </div>
-                  ) : null}
-                  {sideQuestionParentKey !== null &&
-                  sideQuestionParentRef !== null &&
-                  !isDraftHeroState ? (
-                    <SideQuestionCard
-                      parentKey={sideQuestionParentKey}
-                      parentThreadRef={sideQuestionParentRef}
-                      environmentId={environmentId}
-                      shells={sideQuestionShells}
-                      markdownCwd={
-                        activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? undefined
-                      }
-                      timelineAtEnd={!showScrollToBottom}
-                      revealTarget={composerOverlayElement?.parentElement ?? null}
-                      onFork={forkSideQuestionStable}
-                      onDelete={deleteSideQuestionStable}
-                    />
                   ) : null}
                   <div
                     ref={draftHeroComposerAnchorRef}

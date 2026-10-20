@@ -35,11 +35,11 @@ const TOOL_ITEM_TYPES = new Set([
 
 /**
  * The answer to a `/btw` question, as a frosted island floating at the right of
- * the composer, three quarters of its width. It sits in the composer stack's
+ * the composer, three quarters of its width. It sits in the composer overlay's
  * flow rather than the timeline: as a timeline row it would move the
- * end-of-thread anchor every time it grew, and in the stack the overlay's
- * measurement already pushes the timeline's bottom inset by the island's
- * height, so it never covers the last message.
+ * end-of-thread anchor every time it grew, and in the overlay its height
+ * already counts toward the timeline's bottom inset, so it never covers the
+ * last message.
  */
 export function SideQuestionCard(props: {
   readonly parentKey: string;

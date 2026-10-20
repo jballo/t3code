@@ -870,6 +870,27 @@ describe("CursorAdapterV2", () => {
     );
   });
 
+  it("offers a read-only sandbox only the tools that read", () => {
+    const optionsFor = (sandboxPolicy?: { readonly type: string }) =>
+      makeCursorAgentOptions({
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2.5" },
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: "/workspace",
+          ...(sandboxPolicy === undefined ? {} : { approvalPolicy: "never", sandboxPolicy }),
+        },
+        threadId: ThreadId.make("thread-cursor-read-only"),
+        mcpSession: undefined,
+      });
+    assert.isUndefined(optionsFor().tools);
+    const tools = optionsFor({ type: "readOnly" }).tools ?? [];
+    assert.include(tools, "read");
+    for (const writes of ["edit", "delete", "shell", "task", "mcp", "applyAgentDiff"]) {
+      assert.notInclude(tools, writes);
+    }
+  });
+
   it("loads the user's Cursor settings layers in every runtime mode", () => {
     for (const runtimeMode of ["full-access", "auto-accept-edits", "approval-required"] as const) {
       const options = makeCursorAgentOptions({

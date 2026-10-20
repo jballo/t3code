@@ -8,6 +8,8 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
+import { dynamicToolTitle } from "@t3tools/shared/toolActivity";
 import {
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -27,6 +29,7 @@ import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
 import { Tooltip, TooltipPopup, TooltipScrollDismissArea, TooltipTrigger } from "../ui/tooltip";
 import { useThreadProjection } from "../../state/entities";
+import { providerErrorPresentation } from "../../session-logic";
 import { resolveVisibleSideQuestion, sideQuestionActivity } from "../../sideQuestion.logic";
 import { selectSideQuestionView, useSideQuestionStore } from "../../sideQuestionStore";
 
@@ -39,7 +42,8 @@ const TOOL_ITEM_TYPES = new Set([
   "error",
 ]);
 
-// Claude titles its steps; Codex sends untitled items, so name them by what they act on.
+// Claude titles its steps; Codex sends untitled items, so name them by what they
+// act on, the way the thread's own work log does.
 function stepTitle(item: OrchestrationV2TurnItem): string {
   if (item.title) return item.title;
   switch (item.type) {
@@ -51,6 +55,15 @@ function stepTitle(item: OrchestrationV2TurnItem): string {
       return item.pattern === undefined ? "Search files" : `Search ${item.pattern}`;
     case "web_search":
       return item.patterns?.[0] === undefined ? "Search the web" : `Search ${item.patterns[0]}`;
+    case "dynamic_tool":
+      return (
+        resolveT3McpToolDefinition(item.toolName)?.displayName ??
+        dynamicToolTitle(item.toolName, item.input, item.title) ??
+        item.toolName ??
+        "Tool call"
+      );
+    case "error":
+      return providerErrorPresentation(item).label;
     default:
       return item.type;
   }

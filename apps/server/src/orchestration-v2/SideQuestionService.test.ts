@@ -146,7 +146,7 @@ it.effect("creates a read-only child under the parent and sends it the snapshot"
     assert.equal(create.sideChat, true);
     assert.equal(create.title, "why p-retry instead of a hand-rolled loop?");
     assert.deepEqual(create.modelSelection, modelSelection);
-    assert.equal(create.runtimeMode, "approval-required");
+    assert.equal(create.runtimeMode, "full-access");
     assert.equal(create.branch, "feat/retry");
     assert.equal(create.worktreePath, "/worktrees/retry");
     assert.equal(create.projectId, projectId);

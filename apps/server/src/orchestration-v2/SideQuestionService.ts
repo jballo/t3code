@@ -148,9 +148,10 @@ const make = Effect.gen(function* () {
           projectId: parent.projectId,
           title: sideQuestionTitle(input.question),
           modelSelection: parent.modelSelection,
-          // The runtime policy makes a side question read-only regardless; the
-          // strictest mode is what the card shows and what mode-only adapters get.
-          runtimeMode: "approval-required",
+          // RuntimePolicy makes every side-chat turn read-only whatever this says,
+          // so it carries the parent's mode for after Fork, when the thread should
+          // work like the one it came from.
+          runtimeMode: parent.runtimeMode,
           interactionMode: "default",
           branch: parent.branch,
           worktreePath: parent.worktreePath,

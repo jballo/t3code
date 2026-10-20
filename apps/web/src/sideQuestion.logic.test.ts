@@ -6,6 +6,7 @@ import {
   parseSideQuestionCommand,
   resolveVisibleSideQuestion,
   sideQuestionActivity,
+  sideQuestionAfterDelete,
 } from "./sideQuestion.logic";
 
 const shell = (id: string, input: { runStatus?: string | null; active?: boolean } = {}) =>
@@ -56,6 +57,14 @@ describe("resolveVisibleSideQuestion", () => {
     expect(nextSideQuestionToView(shells, "c" as ThreadId)).toBe(middle);
     expect(nextSideQuestionToView(shells, "a" as ThreadId)).toBe(newest);
     expect(nextSideQuestionToView([], null)).toBeNull();
+  });
+
+  it("lands on the neighbor after a delete", () => {
+    expect(sideQuestionAfterDelete(shells, "c" as ThreadId)).toBe(middle);
+    expect(sideQuestionAfterDelete(shells, "b" as ThreadId)).toBe(oldest);
+    expect(sideQuestionAfterDelete(shells, "a" as ThreadId)).toBe(middle);
+    expect(sideQuestionAfterDelete([newest], "c" as ThreadId)).toBeNull();
+    expect(sideQuestionAfterDelete(shells, "missing" as ThreadId)).toBeNull();
   });
 });
 

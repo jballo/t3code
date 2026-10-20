@@ -40,6 +40,16 @@ export function nextSideQuestionToView<T extends SideQuestionShell>(
   return shells[(index + 1) % shells.length] ?? null;
 }
 
+/** The question that takes a deleted one's place: the older neighbor, else the newer one. */
+export function sideQuestionAfterDelete<T extends SideQuestionShell>(
+  shells: ReadonlyArray<T>,
+  deletedThreadId: ThreadId,
+): T | null {
+  const index = shells.findIndex((shell) => shell.id === deletedThreadId);
+  if (index === -1) return null;
+  return shells[index + 1] ?? shells[index - 1] ?? null;
+}
+
 export type SideQuestionActivity = "thinking" | "answered" | "failed" | "interrupted";
 
 export function sideQuestionActivity(shell: SideQuestionShell): SideQuestionActivity {

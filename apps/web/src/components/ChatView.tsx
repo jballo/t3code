@@ -363,6 +363,7 @@ import {
   nextSideQuestionToView,
   parseSideQuestionCommand,
   resolveVisibleSideQuestion,
+  sideQuestionAfterDelete,
 } from "../sideQuestion.logic";
 import { selectSideQuestionView, useSideQuestionStore } from "../sideQuestionStore";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
@@ -5917,6 +5918,7 @@ export default function ChatView(props: ChatViewProps) {
   const forkSideQuestionStable = useStableCallback(forkSideQuestion);
   const deleteSideQuestion = async (threadId: ThreadId) => {
     if (serverThread === null || sideQuestionParentKey === null) return;
+    const neighbor = sideQuestionAfterDelete(sideQuestionShells, threadId);
     // Deleting cancels a run still in progress, so no separate interrupt is needed.
     const result = await deleteThread({ environmentId, input: { threadId } });
     if (result._tag === "Failure") {
@@ -5929,8 +5931,8 @@ export default function ChatView(props: ChatViewProps) {
       }
       return;
     }
-    // The card falls back to the newest remaining question.
-    clearSideQuestionViewing(sideQuestionParentKey);
+    if (neighbor === null) clearSideQuestionViewing(sideQuestionParentKey);
+    else showSideQuestion(sideQuestionParentKey, neighbor.id);
   };
   const deleteSideQuestionStable = useStableCallback(deleteSideQuestion);
 

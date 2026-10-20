@@ -2,7 +2,12 @@ import {
   type EnvironmentThreadShell,
   threadRuntimeIsActive,
 } from "@t3tools/client-runtime/state/models";
-import type { ThreadId } from "@t3tools/contracts";
+import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
+import type { OrchestrationV2TurnItem, ThreadId } from "@t3tools/contracts";
+import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
+import { collectToolFilePaths, dynamicToolTitle } from "@t3tools/shared/toolActivity";
+
+import { providerErrorPresentation } from "./session-logic";
 
 export type SideQuestionCommand =
   | { readonly kind: "ask"; readonly question: string }
@@ -69,5 +74,42 @@ export function sideQuestionActivity(shell: SideQuestionShell): SideQuestionActi
       return "thinking";
     default:
       return "interrupted";
+  }
+}
+
+// Claude titles its steps; Codex sends untitled items, so name them by what they
+// act on, the way the thread's own work log does.
+export function sideQuestionStepTitle(item: OrchestrationV2TurnItem): string {
+  // The command says more than its title, which some providers set to just
+  // the tool's name ("bash").
+  if (item.type === "command_execution" && item.input.trim() !== "") {
+    return commandDisplayText(item.input);
+  }
+  // Muse and Pi title a tool step with just its name ("read_file"), which
+  // hides the file it acts on.
+  const title = item.type === "dynamic_tool" && item.title === item.toolName ? null : item.title;
+  if (title) return title;
+  switch (item.type) {
+    case "command_execution":
+      return "Run a command";
+    case "file_change":
+      return `Edit ${item.fileName}`;
+    case "file_search":
+      return item.pattern === undefined ? "Search files" : `Search ${item.pattern}`;
+    case "web_search":
+      return item.patterns?.[0] === undefined ? "Search the web" : `Search ${item.patterns[0]}`;
+    case "dynamic_tool": {
+      const named =
+        resolveT3McpToolDefinition(item.toolName)?.displayName ??
+        dynamicToolTitle(item.toolName, item.input, item.title);
+      if (named !== undefined) return named;
+      const path = collectToolFilePaths({ input: item.input })[0];
+      if (item.toolName === null) return path === undefined ? "Tool call" : path;
+      return path === undefined ? item.toolName : `${item.toolName} ${path}`;
+    }
+    case "error":
+      return providerErrorPresentation(item).label;
+    default:
+      return item.type;
   }
 }

@@ -7,6 +7,7 @@ import {
   resolveVisibleSideQuestion,
   sideQuestionActivity,
   sideQuestionAfterDelete,
+  sideQuestionStepTitle,
 } from "./sideQuestion.logic";
 
 const shell = (id: string, input: { runStatus?: string | null; active?: boolean } = {}) =>
@@ -78,5 +79,46 @@ describe("sideQuestionActivity", () => {
     expect(sideQuestionActivity(shell("x", { runStatus: "completed" }))).toBe("answered");
     expect(sideQuestionActivity(shell("x", { runStatus: "failed" }))).toBe("failed");
     expect(sideQuestionActivity(shell("x", { runStatus: "interrupted" }))).toBe("interrupted");
+  });
+});
+
+describe("sideQuestionStepTitle", () => {
+  const tool = (title: string | null, toolName: string | null, input: unknown) =>
+    ({ type: "dynamic_tool", title, toolName, input }) as never;
+
+  it("names a step titled only by its tool after the file it touches", () => {
+    // Muse and Pi send their tool's name as the title.
+    expect(sideQuestionStepTitle(tool("read_file", "read_file", { path: "src/config.ts" }))).toBe(
+      "read_file src/config.ts",
+    );
+    expect(sideQuestionStepTitle(tool("read", "read", { path: "src/run.ts" }))).toBe(
+      "read src/run.ts",
+    );
+  });
+
+  it("keeps the titles and names other providers send", () => {
+    // Claude titles its own steps.
+    expect(
+      sideQuestionStepTitle(tool("Read /repo/src/config.ts", "Read", { file_path: "/repo/x.ts" })),
+    ).toBe("Read /repo/src/config.ts");
+    expect(sideQuestionStepTitle(tool(null, "ToolSearch", { query: "select:Read" }))).toBe(
+      "ToolSearch",
+    );
+    // Codex leaves T3's tools untitled; the catalog names them.
+    expect(sideQuestionStepTitle(tool(null, "t3-code.orchestrator_capabilities", {}))).toBe(
+      "Get orchestration capabilities",
+    );
+    // A tool-name title with nothing to point at stays as it was.
+    expect(sideQuestionStepTitle(tool("list_skills", "list_skills", {}))).toBe("list_skills");
+  });
+
+  it("shows the command rather than a tool-name title", () => {
+    expect(
+      sideQuestionStepTitle({
+        type: "command_execution",
+        title: "bash",
+        input: "wc -l a.ts",
+      } as never),
+    ).toBe("wc -l a.ts");
   });
 });

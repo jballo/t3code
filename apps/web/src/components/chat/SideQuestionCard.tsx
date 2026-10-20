@@ -1,15 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
-import type {
-  EnvironmentId,
-  OrchestrationV2TurnItem,
-  ScopedThreadRef,
-  ThreadId,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
-import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
-import { dynamicToolTitle } from "@t3tools/shared/toolActivity";
 import {
   CheckCircle2Icon,
   ChevronDownIcon,
@@ -29,8 +21,11 @@ import { Button } from "../ui/button";
 import { ComposerBanner } from "./ComposerBanner";
 import { Tooltip, TooltipPopup, TooltipScrollDismissArea, TooltipTrigger } from "../ui/tooltip";
 import { useThreadProjection } from "../../state/entities";
-import { providerErrorPresentation } from "../../session-logic";
-import { resolveVisibleSideQuestion, sideQuestionActivity } from "../../sideQuestion.logic";
+import {
+  resolveVisibleSideQuestion,
+  sideQuestionActivity,
+  sideQuestionStepTitle,
+} from "../../sideQuestion.logic";
 import { selectSideQuestionView, useSideQuestionStore } from "../../sideQuestionStore";
 
 const TOOL_ITEM_TYPES = new Set([
@@ -41,38 +36,6 @@ const TOOL_ITEM_TYPES = new Set([
   "dynamic_tool",
   "error",
 ]);
-
-// Claude titles its steps; Codex sends untitled items, so name them by what they
-// act on, the way the thread's own work log does.
-function stepTitle(item: OrchestrationV2TurnItem): string {
-  // The command says more than its title, which some providers set to just
-  // the tool's name ("bash").
-  if (item.type === "command_execution" && item.input.trim() !== "") {
-    return commandDisplayText(item.input);
-  }
-  if (item.title) return item.title;
-  switch (item.type) {
-    case "command_execution":
-      return "Run a command";
-    case "file_change":
-      return `Edit ${item.fileName}`;
-    case "file_search":
-      return item.pattern === undefined ? "Search files" : `Search ${item.pattern}`;
-    case "web_search":
-      return item.patterns?.[0] === undefined ? "Search the web" : `Search ${item.patterns[0]}`;
-    case "dynamic_tool":
-      return (
-        resolveT3McpToolDefinition(item.toolName)?.displayName ??
-        dynamicToolTitle(item.toolName, item.input, item.title) ??
-        item.toolName ??
-        "Tool call"
-      );
-    case "error":
-      return providerErrorPresentation(item).label;
-    default:
-      return item.type;
-  }
-}
 
 /**
  * The answer to a `/btw` question, as a frosted island floating at the right of
@@ -127,7 +90,7 @@ export function SideQuestionCard(props: {
   const workspacePrefix =
     props.markdownCwd === undefined ? null : `${props.markdownCwd.replace(/[/\\]+$/, "")}/`;
   const stepLabel = (row: (typeof tools)[number]) => {
-    const title = stepTitle(row.item);
+    const title = sideQuestionStepTitle(row.item);
     return workspacePrefix === null ? title : title.replaceAll(workspacePrefix, "");
   };
   // Shells run newest first, so "1 / 3" is the latest question and the right

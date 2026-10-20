@@ -246,14 +246,22 @@ export function SideQuestionCard(props: {
                     </div>
                   ) : null}
                   {answerText !== "" ? (
-                    <ChatMarkdown
-                      text={answerText}
-                      cwd={props.markdownCwd}
-                      threadRef={props.parentThreadRef}
-                      environmentId={environmentId}
-                      isStreaming={answerStreaming}
-                      lineBreaks={shouldPreserveAssistantLineBreaks(answerText)}
-                    />
+                    <>
+                      <ChatMarkdown
+                        text={answerText}
+                        cwd={props.markdownCwd}
+                        threadRef={props.parentThreadRef}
+                        environmentId={environmentId}
+                        isStreaming={answerStreaming}
+                        lineBreaks={shouldPreserveAssistantLineBreaks(answerText)}
+                      />
+                      {/* Text written before a stop is not the whole answer. */}
+                      {activity === "interrupted" ? (
+                        <p className="mt-2 text-muted-foreground">
+                          Stopped before it finished. Ask again with /btw.
+                        </p>
+                      ) : null}
+                    </>
                   ) : failureMessage !== null && activity === "failed" ? (
                     <p className="text-destructive-foreground">{failureMessage}</p>
                   ) : activity === "interrupted" ? (

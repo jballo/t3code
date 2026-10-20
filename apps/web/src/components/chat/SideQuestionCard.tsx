@@ -45,10 +45,15 @@ const TOOL_ITEM_TYPES = new Set([
 // Claude titles its steps; Codex sends untitled items, so name them by what they
 // act on, the way the thread's own work log does.
 function stepTitle(item: OrchestrationV2TurnItem): string {
+  // The command says more than its title, which some providers set to just
+  // the tool's name ("bash").
+  if (item.type === "command_execution" && item.input.trim() !== "") {
+    return commandDisplayText(item.input);
+  }
   if (item.title) return item.title;
   switch (item.type) {
     case "command_execution":
-      return commandDisplayText(item.input);
+      return "Run a command";
     case "file_change":
       return `Edit ${item.fileName}`;
     case "file_search":

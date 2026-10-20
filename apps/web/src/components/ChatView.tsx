@@ -5894,11 +5894,29 @@ export default function ChatView(props: ChatViewProps) {
   );
   const forkSideQuestion = async (threadId: ThreadId) => {
     if (serverThread === null || sideQuestionParentKey === null) return;
-    // Promotion is just dropping the flag: the thread already has the whole exchange.
-    const result = await updateThreadMetadata({
-      environmentId,
-      input: { threadId, sideChat: false },
-    });
+    // A side question's stored mode is only a placeholder, since its turns are
+    // forced read-only, and older questions stored Supervised. The fork should
+    // work like the thread it came from, so it takes the parent's current mode.
+    const shell = sideQuestionShells.find((candidate) => candidate.id === threadId);
+    const modeResult =
+      shell === undefined || shell.runtimeMode === serverThread.runtimeMode
+        ? AsyncResult.success(undefined)
+        : await setThreadRuntimeMode({
+            environmentId,
+            input: {
+              threadId,
+              runtimeMode: serverThread.runtimeMode,
+              createdAt: new Date().toISOString(),
+            },
+          });
+    // Promotion is otherwise just dropping the flag: the thread already has the whole exchange.
+    const result =
+      modeResult._tag === "Failure"
+        ? modeResult
+        : await updateThreadMetadata({
+            environmentId,
+            input: { threadId, sideChat: false },
+          });
     if (result._tag === "Failure") {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);

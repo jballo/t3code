@@ -5875,11 +5875,13 @@ export default function ChatView(props: ChatViewProps) {
   // Picking the command shows what is already there, folded or dismissed,
   // without moving off the question the card is on.
   const revealSideQuestions = () => {
-    if (sideQuestionParentKey === null) return;
+    if (sideQuestionParentKey === null) return false;
     const shown =
       resolveVisibleSideQuestion(sideQuestionShells, sideQuestionViewingId) ??
       sideQuestionShells[0];
-    if (shown !== undefined) showSideQuestion(sideQuestionParentKey, shown.id);
+    if (shown === undefined) return false;
+    showSideQuestion(sideQuestionParentKey, shown.id);
+    return true;
   };
   const revealSideQuestionsStable = useStableCallback(revealSideQuestions);
   const prefillSideQuestion = () => {

@@ -1522,8 +1522,11 @@ export interface ChatComposerProps {
   onUsageLimitsCommand?: (() => void) | undefined;
   /** Offers `/btw` in the slash menu. ChatView runs the command on send. */
   sideQuestionsAvailable?: boolean | undefined;
-  /** Picking `/btw` from the menu brings the thread's side questions into view. */
-  onSideQuestionPicked?: (() => void) | undefined;
+  /**
+   * Picking `/btw` from the menu brings the thread's side questions into view.
+   * Returns whether there were any to show.
+   */
+  onSideQuestionPicked?: (() => boolean) | undefined;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -3800,8 +3803,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.command === "btw") {
-        // The question still has to be typed, so the command stays as text.
-        const replacement = "/btw ";
+        // With questions to show, picking it was the whole command. Without
+        // any, the question still has to be typed, so the command stays as text.
+        const revealed = props.onSideQuestionPicked?.() ?? false;
+        const replacement = revealed ? "" : "/btw ";
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
           trigger.rangeEnd,
@@ -3815,7 +3820,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         );
         if (applied) {
           setComposerHighlightedItemId(null);
-          props.onSideQuestionPicked?.();
         }
         return;
       }

@@ -1,6 +1,12 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
+import type {
+  EnvironmentId,
+  OrchestrationV2TurnItem,
+  ScopedThreadRef,
+  ThreadId,
+} from "@t3tools/contracts";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import {
   CheckCircle2Icon,
@@ -32,6 +38,23 @@ const TOOL_ITEM_TYPES = new Set([
   "dynamic_tool",
   "error",
 ]);
+
+// Claude titles its steps; Codex sends untitled items, so name them by what they act on.
+function stepTitle(item: OrchestrationV2TurnItem): string {
+  if (item.title) return item.title;
+  switch (item.type) {
+    case "command_execution":
+      return commandDisplayText(item.input);
+    case "file_change":
+      return `Edit ${item.fileName}`;
+    case "file_search":
+      return item.pattern === undefined ? "Search files" : `Search ${item.pattern}`;
+    case "web_search":
+      return item.patterns?.[0] === undefined ? "Search the web" : `Search ${item.patterns[0]}`;
+    default:
+      return item.type;
+  }
+}
 
 /**
  * The answer to a `/btw` question, as a frosted island floating at the right of
@@ -86,7 +109,7 @@ export function SideQuestionCard(props: {
   const workspacePrefix =
     props.markdownCwd === undefined ? null : `${props.markdownCwd.replace(/[/\\]+$/, "")}/`;
   const stepLabel = (row: (typeof tools)[number]) => {
-    const title = row.item.title ?? row.item.type;
+    const title = stepTitle(row.item);
     return workspacePrefix === null ? title : title.replaceAll(workspacePrefix, "");
   };
   // Shells run newest first, so "1 / 3" is the latest question and the right

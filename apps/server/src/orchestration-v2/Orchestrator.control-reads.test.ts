@@ -21,6 +21,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -706,6 +707,100 @@ it.effect("links a side chat under its parent without claiming a fork, and promo
     );
     // An unknown parent is a rejected command, not a projection failure.
     assert.equal(missingParent._tag, "OrchestratorDispatchError");
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("promoting a side chat restarts sessions that cannot change mode in place", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const parentId = ThreadId.make("thread:side-chat-restart-parent");
+    const sideChatId = ThreadId.make("thread:side-chat-restart-child");
+    const base = {
+      projectId: ProjectId.make("project:side-chat-restart"),
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-restart-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-restart-child"),
+      threadId: sideChatId,
+      title: "Side chat",
+      parentThreadId: parentId,
+      sideChat: true,
+      ...base,
+    });
+    const attach = (id: string, supportsRuntimeModeSwitchInSession: boolean) =>
+      projections.apply({
+        id: EventId.make(`attach-${id}`),
+        type: "provider-session.attached",
+        threadId: sideChatId,
+        occurredAt: now,
+        payload: {
+          id: ProviderSessionId.make(id),
+          driver: adapter.driver,
+          providerInstanceId: instanceId,
+          status: "ready",
+          cwd: "/repo",
+          model: modelSelection.model,
+          capabilities: {
+            ...CodexProviderCapabilitiesV2,
+            sessions: {
+              ...CodexProviderCapabilitiesV2.sessions,
+              supportsRuntimeModeSwitchInSession,
+            },
+          },
+          createdAt: now,
+          updatedAt: now,
+          lastError: null,
+        },
+      });
+    yield* attach("session:switches-mode", true);
+    yield* attach("session:fixed-mode", false);
+
+    const detachedBy = (commandId: CommandId) =>
+      eventSink.readByCommandId({ commandId }).pipe(
+        Stream.runCollect,
+        Effect.map((stored) =>
+          [...stored].flatMap(({ event }) =>
+            event.type === "provider-session.detached" ? [event.payload.providerSessionId] : [],
+          ),
+        ),
+      );
+
+    const renameId = CommandId.make("rename-side-chat-restart");
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: renameId,
+      threadId: sideChatId,
+      title: "Renamed",
+    });
+    assert.deepEqual(yield* detachedBy(renameId), []);
+
+    // Its turns ran read-only, so after promotion its stored mode applies for
+    // the first time, the same change a runtime mode switch makes.
+    const promoteId = CommandId.make("promote-side-chat-restart");
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: promoteId,
+      threadId: sideChatId,
+      sideChat: false,
+    });
+    assert.deepEqual(yield* detachedBy(promoteId), [ProviderSessionId.make("session:fixed-mode")]);
   }).pipe(Effect.provide(layerTest)),
 );
 

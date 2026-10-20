@@ -2708,7 +2708,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     }
 
+    // A side question runs read-only whatever its stored mode, so promoting it
+    // changes the policy its provider session was opened with, like a mode change.
+    const promotesSideQuestion =
+      command.type === "thread.metadata.update" &&
+      command.sideChat === false &&
+      thread.sideChat === true;
     const needsProviderState =
+      promotesSideQuestion ||
       command.type === "thread.runtime-mode.set" ||
       command.type === "thread.model-selection.set" ||
       command.type === "provider.switch" ||
@@ -3398,7 +3405,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             command.worktreePath !== undefined &&
             command.worktreePath !== thread.worktreePath
           ? (providerContext?.providerSessions ?? []).map((session) => session.id)
-          : command.type === "thread.runtime-mode.set"
+          : command.type === "thread.runtime-mode.set" || promotesSideQuestion
             ? (providerContext?.providerSessions ?? [])
                 .filter(
                   (session) => !session.capabilities.sessions.supportsRuntimeModeSwitchInSession,
@@ -3434,10 +3441,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     ? "Thread archived."
                     : command.type === "thread.settle"
                       ? "Thread settled."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
+                      : command.type === "thread.runtime-mode.set" || promotesSideQuestion
+                        ? "Runtime mode changed."
+                        : command.type === "thread.metadata.update"
+                          ? "Workspace changed."
                           : "Provider or model selection changed.",
               },
             });
@@ -3453,10 +3460,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     ? "Thread archived."
                     : command.type === "thread.settle"
                       ? "Thread settled."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
+                      : command.type === "thread.runtime-mode.set" || promotesSideQuestion
+                        ? "Runtime mode changed."
+                        : command.type === "thread.metadata.update"
+                          ? "Workspace changed."
                           : "Provider or model selection changed.",
                 // Terminal detaches revoke the thread's MCP credentials; other
                 // detach reasons keep them so a re-attaching provider process

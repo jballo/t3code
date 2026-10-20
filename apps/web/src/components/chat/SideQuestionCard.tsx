@@ -337,14 +337,29 @@ export function SideQuestionCard(props: {
                 </Tooltip>
               </ComposerBanner.Content>
               <ComposerBanner.Actions>
-                <Button
-                  type="button"
-                  variant="ghost-muted"
-                  size="compact"
-                  onClick={() => props.onFork(visible.id)}
-                >
-                  Fork
-                </Button>
+                {running ? (
+                  // Forking restarts the provider session under the thread's own
+                  // mode, which would cut off an answer still being written.
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button type="button" variant="ghost-muted" size="compact" aria-disabled />
+                      }
+                    >
+                      Fork
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">Fork once the answer finishes</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost-muted"
+                    size="compact"
+                    onClick={() => props.onFork(visible.id)}
+                  >
+                    Fork
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost-muted"

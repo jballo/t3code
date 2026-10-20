@@ -44,6 +44,11 @@ export interface MuseSdkHostOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
   readonly readOnly?: boolean;
+  /**
+   * Blocks Muse's own file writes for an agent session. Its `:ask-me` profile
+   * only asks about shell commands; workspace writes go through unasked.
+   */
+  readonly disableWrite?: boolean;
   /** Read-only generation needs durable logging for turn/item notifications (verified through 1.1.1). */
   readonly sessionLogging?: boolean;
   readonly signal?: AbortSignal;
@@ -137,7 +142,7 @@ export function musePermissionProfile(runtimeMode: RuntimeMode) {
 }
 
 export function museServeArgs(
-  options: Pick<MuseSdkHostOptions, "readOnly" | "sessionLogging" | "runtimeMode">,
+  options: Pick<MuseSdkHostOptions, "readOnly" | "disableWrite" | "sessionLogging" | "runtimeMode">,
 ) {
   const args = ["serve"];
   if (options.readOnly) {
@@ -146,6 +151,7 @@ export function museServeArgs(
   } else {
     args.push("--trust-workspace");
     if (options.runtimeMode === "full-access") args.push("--disable-sandbox");
+    if (options.disableWrite === true) args.push("--disable-write");
   }
   return args;
 }

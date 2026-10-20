@@ -16,6 +16,7 @@ import {
   makeMuseEnvironment,
   museApprovalMode,
   museLaunch,
+  museServeArgs,
   museVerbatimPath,
   museWorkspaceRoot,
   type MuseSdkHost,
@@ -80,6 +81,14 @@ describe("Muse SDK host", () => {
       expect(Object.keys(source)).toContain(key);
     },
   );
+
+  it("blocks workspace writes for a read-only agent session", () => {
+    expect(museServeArgs({ runtimeMode: "approval-required", disableWrite: true })).toEqual([
+      "serve",
+      "--trust-workspace",
+      "--disable-write",
+    ]);
+  });
 
   it("selects full access explicitly and keeps other runtime modes sandboxed", async () => {
     for (const mode of ["approval-required", "auto-accept-edits", "auto", "full-access"] as const) {

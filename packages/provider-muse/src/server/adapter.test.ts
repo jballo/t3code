@@ -526,6 +526,32 @@ describe("MuseAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("launches a read-only sandbox's host without workspace writes", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeMuse();
+      let disableWrite: boolean | undefined;
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          ...runtimePolicy,
+          sandboxPolicy: { type: "readOnly" },
+        }),
+        {
+          createHost: async (options) => {
+            disableWrite = options.disableWrite;
+            return fake.host;
+          },
+        },
+      );
+      yield* startConversation(harness, fake);
+      assert.strictEqual(disableWrite, true);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("pins Windows turns to Muse's verbatim root and starts Muse in the plain path", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeMuse();

@@ -5877,12 +5877,24 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const hasNativeConfigWithSyntheticModeId = availableConfigIds.has(
             ACP_SESSION_MODE_OPTION_ID,
           );
-          const modeSelection = hasNativeConfigWithSyntheticModeId
-            ? undefined
-            : optionSelections.find((selection) => selection.id === ACP_SESSION_MODE_OPTION_ID);
-          const configSelections = hasNativeConfigWithSyntheticModeId
-            ? optionSelections
-            : optionSelections.filter((selection) => selection.id !== ACP_SESSION_MODE_OPTION_ID);
+          // A side question inherits its parent's selection, but a permissive
+          // mode it picked (bypass) would skip the permission requests that
+          // keep a read-only sandbox from writing. It runs in the agent's
+          // default mode instead, which asks.
+          const readOnly = unknownRecord(runtimePolicy.sandboxPolicy)?.type === "readOnly";
+          const modeSelection =
+            hasNativeConfigWithSyntheticModeId || readOnly
+              ? undefined
+              : optionSelections.find((selection) => selection.id === ACP_SESSION_MODE_OPTION_ID);
+          const configSelections = (
+            hasNativeConfigWithSyntheticModeId
+              ? optionSelections
+              : optionSelections.filter((selection) => selection.id !== ACP_SESSION_MODE_OPTION_ID)
+          ).filter(
+            (selection) =>
+              !readOnly ||
+              configOptions.find((option) => option.id === selection.id)?.category !== "mode",
+          );
           // Probe-time descriptors are a per-model union, so a stored
           // selection can reference an option the live session does not
           // expose (Kilo advertises per-model "effort" descriptors while its

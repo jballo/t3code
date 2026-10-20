@@ -13,7 +13,7 @@ import {
   LockIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import ChatMarkdown from "../ChatMarkdown";
@@ -51,13 +51,10 @@ export function SideQuestionCard(props: {
   readonly environmentId: EnvironmentId;
   readonly shells: ReadonlyArray<EnvironmentThreadShell>;
   readonly markdownCwd: string | undefined;
-  readonly timelineAtEnd: boolean;
-  /** Wheel-down over this element while the timeline is at its end unfolds a folded card. */
-  readonly revealTarget: HTMLElement | null;
   readonly onFork: (threadId: ThreadId) => void;
   readonly onDelete: (threadId: ThreadId) => void;
 }) {
-  const { parentKey, environmentId, shells, timelineAtEnd, revealTarget } = props;
+  const { parentKey, environmentId, shells } = props;
   const view = useSideQuestionStore((state) => selectSideQuestionView(state, parentKey));
   const setCollapsed = useSideQuestionStore((state) => state.setCollapsed);
   const show = useSideQuestionStore((state) => state.show);
@@ -68,15 +65,6 @@ export function SideQuestionCard(props: {
   const collapsed = view.collapsed;
   // Keyed by question so switching questions starts with the steps folded again.
   const [stepsOpenFor, setStepsOpenFor] = useState<ThreadId | null>(null);
-
-  useEffect(() => {
-    if (revealTarget === null || !collapsed || !timelineAtEnd || visible === null) return;
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY > 0) setCollapsed(parentKey, false);
-    };
-    revealTarget.addEventListener("wheel", onWheel, { passive: true });
-    return () => revealTarget.removeEventListener("wheel", onWheel);
-  }, [collapsed, parentKey, revealTarget, setCollapsed, timelineAtEnd, visible]);
 
   // Dismissed hides the card, not the questions: /btw brings it back.
   if (visible === null || view.hidden) return null;
@@ -91,7 +79,16 @@ export function SideQuestionCard(props: {
   const failure = items.findLast((row) => row.item.type === "error")?.item;
   const failureMessage = failure?.type === "error" ? failure.failure.message : null;
   const stepsOpen = stepsOpenFor === visible.id;
-  const currentStep = tools.findLast((row) => row.item.status === "running");
+  // Providers often report a tool step only once it has finished, so while the
+  // question runs the latest step stands in for the current one.
+  const latestStep = tools.at(-1);
+  // Step titles carry absolute paths; inside the workspace they read better relative.
+  const workspacePrefix =
+    props.markdownCwd === undefined ? null : `${props.markdownCwd.replace(/[/\\]+$/, "")}/`;
+  const stepLabel = (row: (typeof tools)[number]) => {
+    const title = row.item.title ?? row.item.type;
+    return workspacePrefix === null ? title : title.replaceAll(workspacePrefix, "");
+  };
   // Shells run newest first, so "1 / 3" is the latest question and the right
   // arrow goes back in time.
   const position = shells.findIndex((shell) => shell.id === visible.id);
@@ -111,12 +108,6 @@ export function SideQuestionCard(props: {
         aria-label="Side question"
         data-side-question-card
         className="pointer-events-auto w-full @xl:w-3/4"
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && !collapsed) {
-            event.stopPropagation();
-            setCollapsed(parentKey, true);
-          }
-        }}
       >
         <ComposerBanner.Row
           className={cn(!collapsed && "items-start")}
@@ -161,10 +152,7 @@ export function SideQuestionCard(props: {
               {collapsed && running ? (
                 // The question gives way first, so the step stays readable.
                 <span className="min-w-0 max-w-1/2 shrink-0 truncate font-mono text-xs text-muted-foreground">
-                  ·{" "}
-                  {currentStep === undefined
-                    ? "Thinking…"
-                    : (currentStep.item.title ?? currentStep.item.type)}
+                  · {latestStep === undefined ? "Thinking…" : stepLabel(latestStep)}
                 </span>
               ) : null}
             </button>
@@ -245,7 +233,7 @@ export function SideQuestionCard(props: {
                         <ul className={cn("flex flex-col gap-0.5", !running && "mt-0.5 ps-4")}>
                           {tools.map((row) => (
                             <li key={row.sourceItemId} className="truncate">
-                              {row.item.title ?? row.item.type}
+                              {stepLabel(row)}
                               {row.item.status === "running" ? " …" : ""}
                             </li>
                           ))}

@@ -8228,8 +8228,6 @@ export default function ChatView(props: ChatViewProps) {
                       markdownCwd={
                         activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? undefined
                       }
-                      timelineAtEnd={!showScrollToBottom}
-                      revealTarget={composerOverlayElement?.parentElement ?? null}
                       onFork={forkSideQuestionStable}
                       onDelete={deleteSideQuestionStable}
                     />

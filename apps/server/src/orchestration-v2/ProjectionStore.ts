@@ -422,6 +422,10 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
+  /** Side questions still attached to a parent; a promoted one has dropped the flag. */
+  readonly getSideQuestionChildThreadIds: (
+    parentThreadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
   readonly getThreadWorktreePaths: () => Effect.Effect<
     ReadonlyArray<{ readonly threadId: ThreadId; readonly worktreePath: string }>,
     ProjectionStoreV2Error
@@ -1513,6 +1517,7 @@ export function threadShellFromProjection(
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
+    ...(projection.thread.sideChat === undefined ? {} : { sideChat: projection.thread.sideChat }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -1770,6 +1775,7 @@ function shellFromState(input: {
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),
+    ...(input.state.thread.sideChat === undefined ? {} : { sideChat: input.state.thread.sideChat }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
@@ -5693,6 +5699,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         )
         .pipe(Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })));
 
+    const getSideQuestionChildThreadIds: ProjectionStoreV2Shape["getSideQuestionChildThreadIds"] = (
+      parentThreadId,
+    ) =>
+      sql<{ readonly thread_id: string }>`
+          SELECT thread_id
+          FROM orchestration_v2_projection_threads
+          WHERE deleted_at IS NULL
+            AND json_extract(payload_json, '$.lineage.parentThreadId') = ${parentThreadId}
+            AND json_extract(payload_json, '$.sideChat') = 1
+          ORDER BY thread_id ASC
+        `.pipe(
+        Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const getThreadsWithPullRequests: ProjectionStoreV2Shape["getThreadsWithPullRequests"] = (
       threadId,
     ) =>
@@ -6069,6 +6090,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThread,
       getSettlementCandidates,
       getThreadsWithPullRequests,
+      getSideQuestionChildThreadIds,
       getThreadWorktreePaths,
       getThreadProjection,
       getTurnStartContext,
@@ -6230,6 +6252,21 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 ? [{ threadId: thread.id, worktreePath: thread.worktreePath }]
                 : [],
             ),
+          ),
+        ),
+      getSideQuestionChildThreadIds: (parentThreadId) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()]
+              .map(({ thread }) => thread)
+              .filter(
+                (thread) =>
+                  thread.deletedAt === null &&
+                  thread.sideChat === true &&
+                  thread.lineage.parentThreadId === parentThreadId,
+              )
+              .map((thread) => thread.id)
+              .toSorted(),
           ),
         ),
       getThreadsWithPullRequests: (threadId) =>

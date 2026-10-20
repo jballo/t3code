@@ -57,6 +57,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
+  OrchestrationAskSideQuestionError,
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
@@ -162,6 +163,7 @@ import {
 } from "./orchestration-v2/WireProjection.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
+import * as SideQuestionService from "./orchestration-v2/SideQuestionService.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
@@ -1183,6 +1185,7 @@ const layerWsRpc = (
       const projectService = yield* ProjectService.ProjectService;
       const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
       const threadSearch = yield* ThreadSearch.ThreadSearch;
+      const sideQuestions = yield* SideQuestionService.SideQuestionService;
 
       const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
@@ -1888,6 +1891,26 @@ const layerWsRpc = (
                   message: "Failed to search threads",
                   cause,
                 }),
+            ),
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.askSideQuestion]: (input) =>
+          Effect.annotateCurrentSpan({
+            "orchestration_v2.thread_id": input.threadId,
+            "orchestration_v2.parent_thread_id": input.parentThreadId,
+          }).pipe(
+            Effect.andThen(
+              sideQuestions.ask({
+                parentThreadId: input.parentThreadId,
+                question: input.question,
+                threadId: input.threadId,
+                messageId: input.messageId,
+                commandId: input.commandId,
+                createdBy: "user",
+                creationSource: input.creationSource ?? "web",
+              }),
+            ),
+            Effect.mapError(
+              (cause) => new OrchestrationAskSideQuestionError({ message: cause.message, cause }),
             ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: (_input) =>

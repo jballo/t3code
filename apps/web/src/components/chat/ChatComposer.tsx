@@ -1520,6 +1520,10 @@ export interface ChatComposerProps {
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
   onUsageLimitsCommand?: (() => void) | undefined;
+  /** Offers `/btw` in the slash menu. ChatView runs the command on send. */
+  sideQuestionsAvailable?: boolean | undefined;
+  /** Picking `/btw` from the menu brings the thread's side questions into view. */
+  onSideQuestionPicked?: (() => void) | undefined;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -2630,6 +2634,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
+        // Only a whole message can be a side question, so the command is offered
+        // at the start of an empty draft and nowhere else.
+        ...(props.sideQuestionsAvailable === true && composerTrigger.rangeStart === 0
+          ? ([
+              {
+                id: "slash:btw",
+                type: "slash-command",
+                command: "btw",
+                label: "/btw",
+                description: "Ask a side question, or send it alone to browse earlier ones",
+              },
+            ] as const)
+          : []),
         ...(planModeUiEnabled
           ? ([
               {
@@ -3779,6 +3796,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (applied) {
           setComposerHighlightedItemId(null);
           setIsComposerModelPickerOpen(true);
+        }
+        return;
+      }
+      if (item.command === "btw") {
+        // The question still has to be typed, so the command stays as text.
+        const replacement = "/btw ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          props.onSideQuestionPicked?.();
         }
         return;
       }

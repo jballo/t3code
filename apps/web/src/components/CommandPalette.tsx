@@ -73,12 +73,14 @@ import {
   MoonIcon,
   PaletteIcon,
   RotateCcwIcon,
+  MessageCircleQuestionIcon,
   SettingsIcon,
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { requestSideQuestionPrefill } from "./chat/sideQuestionActionBus";
 import {
   useDeferredValue,
   useEffect,
@@ -1728,6 +1730,25 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  if (
+    activeThread !== null &&
+    activeThreadServerConfig?.environment.capabilities.threadSideChats === true
+  ) {
+    actionItems.push({
+      kind: "action",
+      value: "action:side-question",
+      searchTerms: ["btw", "side question", "ask", "aside", "quick question"],
+      title: "Ask a side question",
+      description: "Answered from this thread's context without interrupting it",
+      icon: <MessageCircleQuestionIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.sideQuestion",
+      run: async () => {
+        setOpen(false);
+        requestSideQuestionPrefill();
+      },
     });
   }
 

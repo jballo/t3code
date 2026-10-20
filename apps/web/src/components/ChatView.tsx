@@ -356,6 +356,15 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { threadEnvironment } from "../state/threads";
+import { orchestrationEnvironment } from "../state/orchestration";
+import { SideQuestionCard } from "./chat/SideQuestionCard";
+import { subscribeSideQuestionPrefill } from "./chat/sideQuestionActionBus";
+import {
+  nextSideQuestionToView,
+  parseSideQuestionCommand,
+  resolveVisibleSideQuestion,
+} from "../sideQuestion.logic";
+import { selectSideQuestionView, useSideQuestionStore } from "../sideQuestionStore";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
@@ -382,6 +391,8 @@ import {
   useThreadVisibleTurnItems,
   useThreadCheckpointSummaries,
   waitForThreadShell,
+  useEnvironmentSupportsSideQuestions,
+  useSideQuestionThreadShells,
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
@@ -5493,6 +5504,10 @@ export default function ChatView(props: ChatViewProps) {
       "thread.copyReference": ({ event }) => {
         if (!event.repeat) copyActiveThreadReferenceStable();
       },
+      "thread.sideQuestion": ({ event }) => {
+        if (!sideQuestionsAvailable) return false;
+        if (!event.repeat) prefillSideQuestionStable();
+      },
       "thread.settle": () => {
         if (!readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return false;
         if (!isServerThread || !activeThreadRef || !supportsSettlement) return;
@@ -5793,6 +5808,132 @@ export default function ChatView(props: ChatViewProps) {
     });
   };
 
+  const sideQuestionsSupported = useEnvironmentSupportsSideQuestions(environmentId);
+  const canAskSideQuestion = useAtomValue(
+    orchestrationEnvironment.askSideQuestion.permissionAtom(environmentId),
+  );
+  const sideQuestionsAvailable =
+    sideQuestionsSupported && canAskSideQuestion && isServerThread && canOperateThread;
+  const sideQuestionParentRef = sideQuestionsSupported && isServerThread ? activeThreadRef : null;
+  const sideQuestionParentKey =
+    sideQuestionParentRef === null ? null : scopedThreadKey(sideQuestionParentRef);
+  const sideQuestionShells = useSideQuestionThreadShells(sideQuestionParentRef);
+  const sideQuestionViewingId = useSideQuestionStore(
+    (state) => selectSideQuestionView(state, sideQuestionParentKey).viewingThreadId,
+  );
+  const showSideQuestion = useSideQuestionStore((state) => state.show);
+  const clearSideQuestionViewing = useSideQuestionStore((state) => state.clearViewing);
+  const askSideQuestionCommand = useAtomCommand(orchestrationEnvironment.askSideQuestion, {
+    reportFailure: false,
+  });
+  const askSideQuestion = async (question: string) => {
+    if (serverThread === null || sideQuestionParentKey === null || !sideQuestionsAvailable) return;
+    const parentThreadId = serverThread.id;
+    const threadId = newThreadId();
+    showSideQuestion(sideQuestionParentKey, threadId);
+    const result = await askSideQuestionCommand({
+      environmentId,
+      input: {
+        parentThreadId,
+        question,
+        threadId,
+        messageId: newMessageId(),
+        commandId: CommandId.make(randomUUID()),
+        creationSource: "web",
+      },
+    });
+    if (result._tag === "Failure") {
+      clearSideQuestionViewing(sideQuestionParentKey);
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          parentThreadId,
+          error instanceof Error ? error.message : "Failed to ask the side question.",
+        );
+      }
+    }
+  };
+  const askSideQuestionStable = useStableCallback(askSideQuestion);
+  const cycleSideQuestion = () => {
+    if (sideQuestionParentKey === null) return;
+    const current = resolveVisibleSideQuestion(sideQuestionShells, sideQuestionViewingId);
+    const next = nextSideQuestionToView(sideQuestionShells, current?.id ?? null);
+    if (next !== null) {
+      showSideQuestion(sideQuestionParentKey, next.id);
+      return;
+    }
+    toastManager.add(
+      stackedThreadToast({
+        type: "info",
+        title: "No side questions in this thread yet",
+        description: "Type a question after /btw to ask one.",
+      }),
+    );
+  };
+  const cycleSideQuestionStable = useStableCallback(cycleSideQuestion);
+  // Picking the command shows what is already there, folded or dismissed,
+  // without moving off the question the card is on.
+  const revealSideQuestions = () => {
+    if (sideQuestionParentKey === null) return;
+    const shown =
+      resolveVisibleSideQuestion(sideQuestionShells, sideQuestionViewingId) ??
+      sideQuestionShells[0];
+    if (shown !== undefined) showSideQuestion(sideQuestionParentKey, shown.id);
+  };
+  const revealSideQuestionsStable = useStableCallback(revealSideQuestions);
+  const prefillSideQuestion = () => {
+    if (!sideQuestionsAvailable) return;
+    composerRef.current?.insertTextAtEnd("/btw ");
+    focusComposerStable();
+  };
+  const prefillSideQuestionStable = useStableCallback(prefillSideQuestion);
+  useEffect(
+    () => subscribeSideQuestionPrefill(() => prefillSideQuestionStable()),
+    [prefillSideQuestionStable],
+  );
+  const forkSideQuestion = async (threadId: ThreadId) => {
+    if (serverThread === null || sideQuestionParentKey === null) return;
+    // Promotion is just dropping the flag: the thread already has the whole exchange.
+    const result = await updateThreadMetadata({
+      environmentId,
+      input: { threadId, sideChat: false },
+    });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          serverThread.id,
+          error instanceof Error ? error.message : "Failed to fork the side question.",
+        );
+      }
+      return;
+    }
+    clearSideQuestionViewing(sideQuestionParentKey);
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+    });
+  };
+  const forkSideQuestionStable = useStableCallback(forkSideQuestion);
+  const deleteSideQuestion = async (threadId: ThreadId) => {
+    if (serverThread === null || sideQuestionParentKey === null) return;
+    // Deleting cancels a run still in progress, so no separate interrupt is needed.
+    const result = await deleteThread({ environmentId, input: { threadId } });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          serverThread.id,
+          error instanceof Error ? error.message : "Failed to delete the side question.",
+        );
+      }
+      return;
+    }
+    // The card falls back to the newest remaining question.
+    clearSideQuestionViewing(sideQuestionParentKey);
+  };
+  const deleteSideQuestionStable = useStableCallback(deleteSideQuestion);
+
   const onForkFromRun = async (input: {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
@@ -5936,6 +6077,25 @@ export default function ChatView(props: ChatViewProps) {
         promptRef.current = "";
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
+      }
+      return;
+    }
+    // A side question is a whole message of its own: no attachments or context
+    // ride along, and nothing is sent to this thread. It is decided before the
+    // pending-answer branch so it still works while the thread waits on a
+    // question, which is the best moment to ask one.
+    const sideQuestionCommand =
+      sideQuestionsAvailable && !directAnnotation && !composerHasNonPromptContent
+        ? parseSideQuestionCommand(promptRef.current)
+        : null;
+    if (sideQuestionCommand !== null) {
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      if (sideQuestionCommand.kind === "cycle") {
+        cycleSideQuestionStable();
+      } else {
+        void askSideQuestionStable(sideQuestionCommand.question);
       }
       return;
     }
@@ -8075,6 +8235,23 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     </div>
                   ) : null}
+                  {sideQuestionParentKey !== null &&
+                  sideQuestionParentRef !== null &&
+                  !isDraftHeroState ? (
+                    <SideQuestionCard
+                      parentKey={sideQuestionParentKey}
+                      parentThreadRef={sideQuestionParentRef}
+                      environmentId={environmentId}
+                      shells={sideQuestionShells}
+                      markdownCwd={
+                        activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? undefined
+                      }
+                      timelineAtEnd={!showScrollToBottom}
+                      revealTarget={composerOverlayElement?.parentElement ?? null}
+                      onFork={forkSideQuestionStable}
+                      onDelete={deleteSideQuestionStable}
+                    />
+                  ) : null}
                   <div
                     ref={draftHeroComposerAnchorRef}
                     className="relative z-10"
@@ -8179,6 +8356,8 @@ export default function ChatView(props: ChatViewProps) {
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}
+                              sideQuestionsAvailable={sideQuestionsAvailable}
+                              onSideQuestionPicked={revealSideQuestionsStable}
                               onUsageLimitsCommand={
                                 usageLimitsOffered &&
                                 usageLimitsKey !== null &&

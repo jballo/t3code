@@ -30,6 +30,7 @@ function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
   readonly runtimeMode?: RuntimeMode;
+  readonly sideChat?: boolean;
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
   return {
@@ -45,6 +46,7 @@ function makeThread(input: {
     branch: null,
     worktreePath: input.worktreePath,
     activeProviderThreadId: null,
+    ...(input.sideChat === undefined ? {} : { sideChat: input.sideChat }),
     lineage: {
       parentThreadId: null,
       relationshipToParent: null,
@@ -148,6 +150,29 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(yield* modeFor(grokInstanceId, "auto"), "auto");
       assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
       assert.equal(yield* modeFor(providerInstanceId, "auto-accept-edits"), "auto-accept-edits");
+    }),
+  );
+
+  it.effect("runs a side question read-only without asking, whatever the thread's mode", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, runtimeMode: "full-access", sideChat: true }),
+        modelSelection,
+      });
+      assert.equal(resolved.runtimeMode, "approval-required");
+      assert.equal(resolved.approvalPolicy, "never");
+      assert.deepEqual(resolved.sandboxPolicy, { type: "readOnly" });
+      assert.equal(resolved.cwd, "/project-root");
+
+      const ordinary = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: null, runtimeMode: "full-access" }),
+        modelSelection,
+      });
+      assert.equal(ordinary.runtimeMode, "full-access");
+      assert.isUndefined(ordinary.approvalPolicy);
+      assert.isUndefined(ordinary.sandboxPolicy);
     }),
   );
 });

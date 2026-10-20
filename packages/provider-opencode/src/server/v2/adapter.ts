@@ -313,8 +313,14 @@ type TurnTerminal =
 type Rule = Permission.Rule;
 type RulesPolicy = Pick<
   ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-  "runtimeMode" | "interactionMode"
+  "runtimeMode" | "interactionMode" | "sandboxPolicy"
 >;
+
+const isReadOnlySandbox = (sandboxPolicy: RulesPolicy["sandboxPolicy"]): boolean =>
+  typeof sandboxPolicy === "object" &&
+  sandboxPolicy !== null &&
+  "type" in sandboxPolicy &&
+  sandboxPolicy.type === "readOnly";
 type NativeForm = EventOf<"form.created">["data"]["form"];
 
 interface PendingRequest {
@@ -382,7 +388,11 @@ const sessionRules = (
   ...grants,
   // Plan mode writes only its plan, which `paths` allows again. Shell and read
   // are never denied: the free tier refuses sessions whose rules deny them.
-  ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
+  // A read-only sandbox (a side question) denies edits the same way; its shell
+  // stays "ask", and the side question reactor declines what it asks.
+  ...(policy.interactionMode === "plan" || isReadOnlySandbox(policy.sandboxPolicy)
+    ? [rule("edit", "deny")]
+    : []),
   ...paths,
   ...mcpRules(mcpServerName),
 ];

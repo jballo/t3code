@@ -151,6 +151,26 @@ export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThr
   );
 }
 
+/** A thread's side questions, newest first, dismissed ones included. */
+export function useSideQuestionThreadShells(
+  ref: ScopedThreadRef | null,
+): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(
+    ref === null
+      ? EMPTY_THREAD_SHELLS_ATOM
+      : environmentThreadShells.sideQuestionThreadShellsAtom(ref),
+  );
+}
+
+/** Older servers drop the side-chat fields and would run the question as an ordinary thread. */
+export function useEnvironmentSupportsSideQuestions(environmentId: EnvironmentId | null): boolean {
+  const configs = useServerConfigs();
+  return (
+    environmentId !== null &&
+    configs.get(environmentId)?.environment.capabilities.threadSideChats === true
+  );
+}
+
 export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadStatus {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_STATUS_ATOM : environmentThreadDetails.statusAtom(ref),

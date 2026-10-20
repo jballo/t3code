@@ -3326,10 +3326,13 @@ export function ArchivedThreadsPanel() {
       }),
     );
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.threads.map((thread) => ({
-        ...presentThreadShell(environmentId, thread),
-        environmentLabel: environmentLabels.get(environmentId) ?? environmentId,
-      })),
+      // A dismissed side question is archived, but it belongs to its parent's card.
+      snapshot.threads
+        .filter((thread) => thread.sideChat !== true)
+        .map((thread) => ({
+          ...presentThreadShell(environmentId, thread),
+          environmentLabel: environmentLabels.get(environmentId) ?? environmentId,
+        })),
     );
     const hasMultipleEnvironments =
       new Set(

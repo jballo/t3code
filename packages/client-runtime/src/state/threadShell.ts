@@ -8,11 +8,13 @@ import type {
 } from "@t3tools/contracts";
 import { isProviderNativeSubagentThread, OrchestrationV2ThreadShell } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import * as DateTime from "effect/DateTime";
 import { Atom } from "effect/reactivity";
 
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 import { presentThreadShell, threadRuntimeIsActive } from "./models.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
+import { makeSideChatListingFilter } from "./threadWorkflows.ts";
 import {
   arrayElementsEqual,
   parseProjectRefCollectionKey,
@@ -279,6 +281,32 @@ export function createEnvironmentThreadShellAtoms(input: {
     }).pipe(Atom.withLabel(`environment-quiet-thread-shell:${key}`));
   });
 
+  // Side questions never appear in a thread list, so their parent's card is the
+  // only place that reads them: newest first, dismissed (archived) ones included.
+  const sideQuestionThreadShellsAtomFamily = Atom.family((key: string) => {
+    const ref = parseThreadKey(key);
+    let previous: ReadonlyArray<EnvironmentThreadShell> = [];
+    return Atom.make((get) => {
+      const subagentRequests = get(pendingSubagentRequestsAtom(ref.environmentId));
+      const next = get(environmentThreadsAtom(ref.environmentId))
+        .filter(
+          (thread) =>
+            thread.sideChat === true &&
+            thread.lineage.parentThreadId === ref.threadId &&
+            thread.deletedAt === null,
+        )
+        .slice()
+        .sort(
+          (left, right) =>
+            DateTime.toEpochMillis(right.createdAt) - DateTime.toEpochMillis(left.createdAt),
+        )
+        .map((thread) => scopedThread(ref.environmentId, thread, subagentRequests));
+      if (arrayElementsEqual(previous, next)) return previous;
+      previous = next;
+      return next;
+    }).pipe(Atom.withLabel(`side-question-threads:${key}`));
+  });
+
   // Child approvals and questions are hidden with their sidebar rows. Read their
   // shell summaries, without subscribing to every child transcript.
   const childThreadInputsAtomFamily = Atom.family((key: string) => {
@@ -393,10 +421,19 @@ export function createEnvironmentThreadShellAtoms(input: {
     const next: EnvironmentThreadShell[] = [];
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
-      for (const thread of get(environmentThreadsAtom(environmentId))) {
-        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
+      const threads = get(environmentThreadsAtom(environmentId)).map((thread) =>
+        scopedThread(environmentId, thread, subagentRequests),
+      );
+      // Side chats live in their parent's side panel, not in thread lists.
+      const listable = makeSideChatListingFilter(threads);
+      for (const thread of threads) {
+        if (
+          thread.archivedAt !== null ||
+          thread.lineage.relationshipToParent === "subagent" ||
+          !listable(thread)
+        )
           continue;
-        next.push(scopedThread(environmentId, thread, subagentRequests));
+        next.push(thread);
       }
     }
     if (arrayElementsEqual(previousNavigationShells, next)) return previousNavigationShells;
@@ -417,5 +454,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),
     quietThreadShellAtom: (ref: ScopedThreadRef) => quietThreadShellAtomFamily(threadKey(ref)),
     childThreadInputsAtom: (ref: ScopedThreadRef) => childThreadInputsAtomFamily(threadKey(ref)),
+    sideQuestionThreadShellsAtom: (ref: ScopedThreadRef) =>
+      sideQuestionThreadShellsAtomFamily(threadKey(ref)),
   };
 }

@@ -516,12 +516,13 @@ export const make = Effect.gen(function* () {
     // of one thread's activity proportional to how many threads exist.
     const threadShell = yield* threads.getThreadShell(threadId);
     if (
-      threadShell?.lineage.relationshipToParent === "subagent" &&
+      (threadShell?.lineage.relationshipToParent === "subagent" ||
+        threadShell?.sideChat === true) &&
       !(yield* Ref.get(publishedStateByThreadRef)).has(threadId)
     ) {
-      // Subagents never project activity, so the relay holds no row to clear.
-      // Their events would otherwise publish a tombstone each, and every
-      // publish re-delivers the user's aggregate.
+      // Subagents and side questions never project activity, so the relay holds
+      // no row to clear. Their events would otherwise publish a tombstone each,
+      // and every publish re-delivers the user's aggregate.
       return;
     }
     const thread =

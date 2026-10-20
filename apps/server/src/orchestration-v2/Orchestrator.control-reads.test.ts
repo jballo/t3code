@@ -29,6 +29,7 @@ import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as SideQuestionReactor from "./SideQuestionReactor.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -619,6 +620,160 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
     assert.deepEqual(parentAfterChildLink.thread.linkedPullRequest, parentPullRequest);
     assert.deepEqual(parentAfterChildLink.thread.pullRequests, parent.thread.pullRequests);
   }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("links a side chat under its parent without claiming a fork, and promotes it", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const projectId = ProjectId.make("project:side-chat");
+    const parentId = ThreadId.make("thread:side-chat-parent");
+    const sideChatId = ThreadId.make("thread:side-chat-child");
+    const base = {
+      projectId,
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-child"),
+      threadId: sideChatId,
+      title: "Side chat",
+      parentThreadId: parentId,
+      sideChat: true,
+      ...base,
+    });
+
+    const child = yield* projections.getThread(sideChatId);
+    assert.deepEqual(child.lineage, {
+      parentThreadId: parentId,
+      relationshipToParent: null,
+      rootThreadId: parentId,
+    });
+    assert.isNull(child.forkedFrom);
+    assert.equal(child.sideChat, true);
+    assert.equal((yield* projections.getThreadShell(sideChatId))?.sideChat, true);
+    assert.isUndefined((yield* projections.getThread(parentId)).sideChat);
+    assert.deepEqual(yield* projections.getSideQuestionChildThreadIds(parentId), [sideChatId]);
+
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("promote-side-chat"),
+      threadId: sideChatId,
+      sideChat: false,
+    });
+    assert.equal((yield* projections.getThread(sideChatId)).sideChat, false);
+    assert.equal((yield* projections.getThreadShell(sideChatId))?.sideChat, false);
+    // Promotion detaches it from the parent's disposable set.
+    assert.deepEqual(yield* projections.getSideQuestionChildThreadIds(parentId), []);
+
+    const crossProject = yield* Effect.exit(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-cross-project"),
+        threadId: ThreadId.make("thread:side-chat-cross-project"),
+        title: "Elsewhere",
+        parentThreadId: parentId,
+        sideChat: true,
+        ...base,
+        projectId: ProjectId.make("project:side-chat-other"),
+      }),
+    );
+    assert.equal(crossProject._tag, "Failure");
+
+    const missingParent = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-missing-parent"),
+        threadId: ThreadId.make("thread:side-chat-orphan"),
+        title: "Orphan",
+        parentThreadId: ThreadId.make("thread:side-chat-no-such-parent"),
+        sideChat: true,
+        ...base,
+      }),
+    );
+    // An unknown parent is a rejected command, not a projection failure.
+    assert.equal(missingParent._tag, "OrchestratorDispatchError");
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("deleting a thread deletes its side questions but keeps a promoted one", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* SideQuestionReactor.SideQuestionReactor;
+    const projectId = ProjectId.make("project:side-question-cascade");
+    const parentId = ThreadId.make("thread:side-question-cascade-parent");
+    const attachedId = ThreadId.make("thread:side-question-cascade-attached");
+    const promotedId = ThreadId.make("thread:side-question-cascade-promoted");
+    const base = {
+      projectId,
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("cascade-create-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    for (const [commandId, threadId] of [
+      ["cascade-create-attached", attachedId],
+      ["cascade-create-promoted", promotedId],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(commandId),
+        threadId,
+        title: "Side question",
+        parentThreadId: parentId,
+        sideChat: true,
+        ...base,
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("cascade-promote"),
+      threadId: promotedId,
+      sideChat: false,
+    });
+
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("cascade-delete-parent"),
+      threadId: parentId,
+    });
+    const parent = yield* projections.getThread(parentId);
+    assert.isNotNull(parent.deletedAt);
+    yield* reactor.handle({
+      id: EventId.make("event:cascade-parent-deleted"),
+      type: "thread.deleted",
+      threadId: parentId,
+      occurredAt: yield* DateTime.now,
+      payload: parent,
+    });
+
+    assert.isNotNull((yield* projections.getThread(attachedId)).deletedAt);
+    assert.isNull((yield* projections.getThread(promotedId)).deletedAt);
+  }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
 );
 
 it.effect("wakes the parent once when its delegated task asks a question", () =>

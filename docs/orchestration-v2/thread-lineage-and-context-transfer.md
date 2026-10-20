@@ -256,6 +256,13 @@ Forking or handoff from an active run should either:
 
 Do not silently fork from partially streamed provider state. That weakens correlation and makes replay/recovery difficult.
 
+A side question (`/btw`) deliberately sidesteps this rule rather than breaking it. It is a
+linked child thread (`parentThreadId`, no relationship kind, `sideChat: true`), not a fork, and
+no provider state is transferred. `SideQuestionService` serializes the parent's projected
+timeline, in-progress run included, into the child's first message, so the side agent sees what
+the user sees. The child runs read-only through `RuntimePolicyV2`, and `SideQuestionReactor`
+declines anything it still asks and deletes it with its parent.
+
 ## Current Implementation Boundary
 
 The first backend slice implements lazy same-provider fork resolution:

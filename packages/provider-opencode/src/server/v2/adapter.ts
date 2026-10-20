@@ -372,7 +372,7 @@ const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
         { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
       ];
 
-const sessionRules = (
+export const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
@@ -388,12 +388,12 @@ const sessionRules = (
   ...grants,
   // Plan mode writes only its plan, which `paths` allows again. Shell and read
   // are never denied: the free tier refuses sessions whose rules deny them.
-  // A read-only sandbox (a side question) denies edits the same way; its shell
-  // stays "ask", and the side question reactor declines what it asks.
-  ...(policy.interactionMode === "plan" || isReadOnlySandbox(policy.sandboxPolicy)
-    ? [rule("edit", "deny")]
-    : []),
+  ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
   ...paths,
+  // A read-only sandbox (a side question) denies edits after `paths`, so no
+  // agent path rule allows one back; its shell stays "ask", and the side
+  // question reactor declines what it asks.
+  ...(isReadOnlySandbox(policy.sandboxPolicy) ? [rule("edit", "deny")] : []),
   ...mcpRules(mcpServerName),
 ];
 

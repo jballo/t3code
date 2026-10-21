@@ -19,6 +19,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -73,6 +74,18 @@ export interface AcpRegistryAdapterV2Options {
   >;
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
+
+/**
+ * Claude Agent opens in the mode from the user's Claude settings, and auto or
+ * bypass never asks, so a read-only sandbox gets no request to deny. A side
+ * question runs in its Manual mode, which asks before every change.
+ */
+const claudeAgentModeForPolicy: NonNullable<AcpAdapterV2Flavor["sessionModeForPolicy"]> = (
+  policy,
+) =>
+  Predicate.hasProperty(policy.sandboxPolicy, "type") && policy.sandboxPolicy.type === "readOnly"
+    ? "default"
+    : undefined;
 
 // Mistral Vibe: its application error code for rate limits (not an ACP code).
 const MISTRAL_VIBE_RATE_LIMITED = -31001;
@@ -191,6 +204,7 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
     ...(registryAgentId === "mistral-vibe"
       ? { registerExtensions: registerMistralVibeAcpExtensions }
       : {}),
+    ...(registryAgentId === "claude-acp" ? { sessionModeForPolicy: claudeAgentModeForPolicy } : {}),
     ...(isDevin
       ? {
           clientCapabilitiesMeta: {

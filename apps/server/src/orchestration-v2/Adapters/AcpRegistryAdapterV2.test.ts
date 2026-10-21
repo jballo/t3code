@@ -163,6 +163,8 @@ describe("AcpRegistryAdapterV2", () => {
       readonly setup: unknown;
       readonly modeFrames: ReadonlyArray<Frame>;
       readonly storedModePick: string;
+      readonly agentId?: string;
+      readonly readOnly?: boolean;
     }) {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
@@ -196,7 +198,7 @@ describe("AcpRegistryAdapterV2", () => {
         selfInvocation: yield* resolveSelfInvocation(),
         instanceId,
         settings: yield* decodeAcpRegistryAdapterSettings({
-          agentId: "fixture-agent",
+          agentId: input.agentId ?? "fixture-agent",
           authMethodId: "test",
         }),
         environment: {},
@@ -223,6 +225,9 @@ describe("AcpRegistryAdapterV2", () => {
             runtimeMode: "approval-required",
             interactionMode: "default",
             cwd: replayDir,
+            ...(input.readOnly === true
+              ? { approvalPolicy: "never", sandboxPolicy: { type: "readOnly" } }
+              : {}),
           }),
         })
         .pipe(Effect.scoped);
@@ -257,6 +262,44 @@ describe("AcpRegistryAdapterV2", () => {
           answer("session/set_config_option", { configOptions: [permissionModeOption("auto")] }),
         ],
         storedModePick: "auto",
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    // The user's Claude settings can open Claude Agent in auto mode, which never asks.
+    const claudeAgentModes = {
+      modes: {
+        currentModeId: "auto",
+        availableModes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"].map(
+          (id) => ({ id, name: id }),
+        ),
+      },
+    };
+
+    it.effect("runs a Claude Agent side question in Manual mode", () =>
+      openWithStoredModePick({
+        agentId: "claude-acp",
+        readOnly: true,
+        setup: claudeAgentModes,
+        modeFrames: [
+          outbound("session/set_mode", { sessionId: "agent-session", modeId: "default" }),
+          answer("session/set_mode", {}),
+        ],
+        storedModePick: "bypassPermissions",
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+    );
+
+    it.effect("keeps Claude Agent's picked mode outside a side question", () =>
+      openWithStoredModePick({
+        agentId: "claude-acp",
+        setup: claudeAgentModes,
+        modeFrames: [
+          outbound("session/set_mode", {
+            sessionId: "agent-session",
+            modeId: "bypassPermissions",
+          }),
+          answer("session/set_mode", {}),
+        ],
+        storedModePick: "bypassPermissions",
       }).pipe(Effect.provide(layerTest), Effect.scoped),
     );
   });

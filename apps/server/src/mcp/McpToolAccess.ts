@@ -86,14 +86,31 @@ const refuseReadOnlyClient = McpInvocationContext.McpInvocationContext.pipe(
   ),
 );
 
+/**
+ * A side question keeps its parent's modes so Fork can inherit them, and not
+ * every provider's read-only sandbox covers MCP tools, so its credential
+ * refuses changes here.
+ */
+const refuseSideQuestion = ({ caller }: Caller) =>
+  caller?.sideChat === true
+    ? Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "A side question is read-only and cannot change threads or the environment.",
+        }),
+      )
+    : Effect.void;
+
 const writingCaller = refuseReadOnlyClient.pipe(
   Effect.andThen(loadCaller()),
   Effect.tap(assertLiveCaller),
+  Effect.tap(refuseSideQuestion),
 );
 
 const orchestratingCaller = refuseReadOnlyClient.pipe(
   Effect.andThen(readCaller()),
   Effect.tap(assertLiveCaller),
+  Effect.tap(refuseSideQuestion),
 );
 
 const requireThreadCaller = McpInvocationContext.McpInvocationContext.pipe(

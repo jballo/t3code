@@ -80,6 +80,8 @@ function layerFor(input: {
   readonly parent: OrchestrationV2AppThread | null;
   readonly commands: Array<OrchestrationV2ServerCommand>;
   readonly pages: Array<{ readonly limit: number; readonly afterPosition: number | undefined }>;
+  readonly providerDisabled?: boolean;
+  readonly failCommand?: OrchestrationV2ServerCommand["type"];
 }) {
   return SideQuestionService.layer.pipe(
     Layer.provide(
@@ -101,9 +103,25 @@ function layerFor(input: {
               : { items: timeline, totalItems: timeline.length, hasMore: false },
           );
         },
+        assertProviderInstanceEnabled: (check) =>
+          input.providerDisabled === true
+            ? Effect.fail(
+                new ThreadManagementService.ThreadManagementProviderInstanceDisabledError({
+                  projectId: check.projectId,
+                  instanceId: check.instanceId,
+                }),
+              )
+            : Effect.void,
         dispatch: (command) => {
           input.commands.push(command);
-          return Effect.succeed({ sequence: input.commands.length, storedEvents: [] });
+          return command.type === input.failCommand
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                }),
+              )
+            : Effect.succeed({ sequence: input.commands.length, storedEvents: [] });
         },
       }),
     ),
@@ -185,5 +203,43 @@ it.effect("refuses a parent that is missing, deleted, or itself a side question"
       "deleted",
     );
     assert.equal(yield* reasonFor(makeParent({ sideChat: true })), "side_question");
+  }),
+);
+
+it.effect("refuses a parent whose provider is turned off before creating anything", () =>
+  Effect.gen(function* () {
+    const commands: Array<OrchestrationV2ServerCommand> = [];
+    const service = yield* SideQuestionService.SideQuestionService.pipe(
+      Effect.provide(
+        layerFor({ parent: makeParent(), commands, pages: [], providerDisabled: true }),
+      ),
+    );
+    const error = yield* Effect.flip(service.ask(askInput));
+    assert.equal(error._tag, "SideQuestionParentUnavailableError");
+    assert.equal(
+      error._tag === "SideQuestionParentUnavailableError" ? error.reason : null,
+      "provider_disabled",
+    );
+    assert.deepEqual(commands, []);
+  }),
+);
+
+it.effect("deletes the child when its question fails to send", () =>
+  Effect.gen(function* () {
+    const commands: Array<OrchestrationV2ServerCommand> = [];
+    const service = yield* SideQuestionService.SideQuestionService.pipe(
+      Effect.provide(
+        layerFor({ parent: makeParent(), commands, pages: [], failCommand: "message.dispatch" }),
+      ),
+    );
+    const error = yield* Effect.flip(service.ask(askInput));
+    assert.equal(error._tag, "SideQuestionAskError");
+    assert.equal(error._tag === "SideQuestionAskError" ? error.stage : null, "dispatch_question");
+    assert.deepEqual(
+      commands.map((command) => command.type),
+      ["thread.create", "message.dispatch", "thread.delete"],
+    );
+    const cleanup = commands[2];
+    assert.equal(cleanup?.type === "thread.delete" ? cleanup.threadId : null, askInput.threadId);
   }),
 );

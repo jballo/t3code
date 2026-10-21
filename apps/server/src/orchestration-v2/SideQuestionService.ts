@@ -21,7 +21,7 @@ export class SideQuestionParentUnavailableError extends Schema.TaggedError<SideQ
   "SideQuestionParentUnavailableError",
   {
     parentThreadId: ThreadId,
-    reason: Schema.Literals(["not_found", "deleted", "side_question"]),
+    reason: Schema.Literals(["not_found", "deleted", "side_question", "provider_disabled"]),
   },
 ) {
   override get message(): string {
@@ -32,6 +32,8 @@ export class SideQuestionParentUnavailableError extends Schema.TaggedError<SideQ
         return "That thread was deleted.";
       case "side_question":
         return "A side question cannot be asked about another side question.";
+      case "provider_disabled":
+        return "This thread's provider is turned off. Turn it on in Settings → Providers to ask a side question.";
     }
   }
 }
@@ -120,6 +122,24 @@ const make = Effect.gen(function* () {
         });
       }
 
+      // Sending the question checks this too, but only after the child exists,
+      // which would leave a side question with no run spinning in the card.
+      yield* threadManagement
+        .assertProviderInstanceEnabled({
+          projectId: parent.projectId,
+          commandId: input.commandId,
+          instanceId: parent.modelSelection.instanceId,
+        })
+        .pipe(
+          Effect.mapError(
+            () =>
+              new SideQuestionParentUnavailableError({
+                parentThreadId: input.parentThreadId,
+                reason: "provider_disabled",
+              }),
+          ),
+        );
+
       // Two reads: the page API walks forward, and the snapshot wants the tail.
       const head = yield* threadManagement
         .getTimelinePage(parent.id, { view: "activity", limit: 1 })
@@ -172,7 +192,26 @@ const make = Effect.gen(function* () {
           attachments: [],
           dispatchMode: { type: "start_immediately" },
         })
-        .pipe(Effect.mapError(askError("dispatch_question")));
+        .pipe(
+          Effect.mapError(askError("dispatch_question")),
+          // A child that never got its question would show as thinking forever.
+          Effect.tapError(() =>
+            threadManagement
+              .dispatch({
+                type: "thread.delete",
+                commandId: CommandId.make(`${input.commandId}:side-question-cleanup`),
+                threadId: input.threadId,
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Could not delete a side question that failed to send", {
+                    threadId: input.threadId,
+                    cause,
+                  }),
+                ),
+              ),
+          ),
+        );
 
       return { threadId: input.threadId };
     },

@@ -3,6 +3,7 @@ import type { OrchestrationV2ProjectedTurnItem, OrchestrationV2TurnItem } from "
 const SIDE_QUESTION_CONTEXT_MAX_CHARS = 60_000;
 const SIDE_QUESTION_TOOL_OUTPUT_MAX_CHARS = 400;
 const PLAN_MAX_CHARS = 2_000;
+const MIN_CLIPPED_ITEM_CHARS = 200;
 
 export interface SideQuestionPromptInput {
   readonly title: string;
@@ -16,6 +17,16 @@ export interface SideQuestionPromptInput {
 function clip(text: string, maxChars: number): string {
   const trimmed = text.trim();
   return trimmed.length <= maxChars ? trimmed : `${trimmed.slice(0, maxChars).trimEnd()} […]`;
+}
+
+/** Keeps both ends: a pasted log starts with what the user asked and ends with the error. */
+function clipMiddle(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const keep = Math.max(0, maxChars - 40);
+  const head = Math.ceil(keep / 2);
+  const tail = keep - head;
+  const omitted = text.length - head - tail;
+  return `${text.slice(0, head)}\n[… ${omitted} chars omitted …]\n${text.slice(text.length - tail)}`;
 }
 
 function inProgress(item: OrchestrationV2TurnItem): string {
@@ -106,7 +117,8 @@ export function buildSideQuestionPrompt(input: SideQuestionPromptInput): string 
     const item = input.items[index]!.item;
     if (item.type === "compaction" && item.summary !== undefined && item.summary.trim() !== "") {
       start = index + 1;
-      summary = item.summary.trim();
+      // Capped so the newest messages always have room after it.
+      summary = clipMiddle(item.summary.trim(), Math.floor(maxChars / 2));
       break;
     }
   }
@@ -121,7 +133,16 @@ export function buildSideQuestionPrompt(input: SideQuestionPromptInput): string 
   let kept = 0;
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index]!;
-    if (used + block.length > maxChars) break;
+    if (used + block.length > maxChars) {
+      // A pasted log is often what the question is about, and the main agent's
+      // reply soon sits after it, so the item that doesn't fit is clipped into
+      // the rest of the budget rather than dropped.
+      if (maxChars - used >= MIN_CLIPPED_ITEM_CHARS) {
+        blocks[index] = clipMiddle(block, maxChars - used);
+        kept += 1;
+      }
+      break;
+    }
     used += block.length;
     kept += 1;
   }

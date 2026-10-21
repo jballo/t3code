@@ -80,4 +80,60 @@ describe("buildSideQuestionPrompt", () => {
     expect(prompt).not.toContain("second message");
     expect(prompt).toContain("User:\nthird");
   });
+
+  it("clips the newest item when it alone is over budget, keeping its start and end", () => {
+    const log = `here is the log:\n${"noise ".repeat(200)}\nError: ECONNRESET`;
+    const prompt = buildSideQuestionPrompt({
+      title: "t",
+      question: "what does this error mean?",
+      maxChars: 300,
+      items: [
+        row({ type: "user_message", text: "earlier question" }),
+        row({ type: "user_message", text: log }),
+      ],
+    });
+    const transcript = prompt.slice(prompt.indexOf("<transcript"), prompt.indexOf("</transcript>"));
+
+    expect(transcript).toContain("here is the log:");
+    expect(transcript).toContain("Error: ECONNRESET");
+    expect(transcript).toContain("chars omitted …]");
+    expect(transcript).toContain("[1 earlier item omitted]");
+    expect(transcript.length).toBeLessThan(400);
+  });
+
+  it("clips an oversized item behind newer ones instead of dropping it", () => {
+    const prompt = buildSideQuestionPrompt({
+      title: "t",
+      question: "q",
+      maxChars: 400,
+      items: [
+        row({ type: "user_message", text: "oldest" }),
+        row({ type: "user_message", text: `log:\n${"noise ".repeat(200)}\nError: ETIMEDOUT` }),
+        row({ type: "assistant_message", status: "running", text: "Looking at the log." }),
+      ],
+    });
+
+    expect(prompt).toContain("log:");
+    expect(prompt).toContain("Error: ETIMEDOUT");
+    expect(prompt).toContain("Assistant (in progress):\nLooking at the log.");
+    expect(prompt).toContain("[1 earlier item omitted]");
+    expect(prompt).not.toContain("oldest");
+  });
+
+  it("caps a long compaction summary so the newest messages still fit", () => {
+    const prompt = buildSideQuestionPrompt({
+      title: "t",
+      question: "q",
+      maxChars: 300,
+      items: [
+        row({ type: "compaction", summary: `Summary start. ${"s".repeat(1000)} Summary end.` }),
+        row({ type: "user_message", text: "recent" }),
+      ],
+    });
+
+    expect(prompt).toContain("Summary start.");
+    expect(prompt).toContain("Summary end.");
+    expect(prompt).toContain("User:\nrecent");
+    expect(prompt).not.toContain("s".repeat(300));
+  });
 });

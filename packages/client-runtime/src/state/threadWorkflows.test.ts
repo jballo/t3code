@@ -5,7 +5,6 @@ import {
   canDetachThreadProviderSession,
   canForkProjectedAssistantItem,
   deriveThreadQueueWorkflowState,
-  makeSideChatListingFilter,
   resolveLatestMergeBackRun,
   threadSupportsProviderHandoff,
 } from "./threadWorkflows.ts";
@@ -422,36 +421,4 @@ describe("thread workflows", () => {
       expect(resolveLatestMergeBackRun(projection)).toBeNull();
     },
   );
-});
-
-describe("side chat listing", () => {
-  const shell = (
-    id: string,
-    extra: { sideChat?: boolean; parentThreadId?: string | null; deletedAt?: string | null } = {},
-  ) => ({
-    environmentId: "env",
-    id,
-    sideChat: extra.sideChat,
-    deletedAt: extra.deletedAt ?? null,
-    lineage: { parentThreadId: extra.parentThreadId ?? null },
-  });
-
-  it("hides a side chat while its parent is listed, and lists it once the parent is gone", () => {
-    const parent = shell("parent");
-    const child = shell("child", { sideChat: true, parentThreadId: "parent" });
-    const orphan = shell("orphan", { sideChat: true, parentThreadId: "missing" });
-    const ordinary = shell("ordinary");
-
-    const listable = makeSideChatListingFilter([parent, child, orphan, ordinary]);
-    expect(listable(parent)).toBe(true);
-    expect(listable(child)).toBe(false);
-    expect(listable(orphan)).toBe(true);
-    expect(listable(ordinary)).toBe(true);
-
-    const afterParentDeleted = makeSideChatListingFilter([
-      shell("parent", { deletedAt: "2026-10-19T00:00:00.000Z" }),
-      child,
-    ]);
-    expect(afterParentDeleted(child)).toBe(true);
-  });
 });

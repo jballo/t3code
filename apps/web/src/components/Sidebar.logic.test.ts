@@ -476,12 +476,8 @@ describe("sidebar thread lineage helpers", () => {
     expect(
       filterSidebarV2VisibleThreads([{ ...forkedSideChat, sideChat: false }], null),
     ).toHaveLength(1);
-    // With the parent deleted there is nowhere else to reach it, so it is listed.
-    expect(
-      filterSidebarV2VisibleThreads([forkedSideChat, linkedSideChat], null).map(
-        (thread) => thread.id,
-      ),
-    ).toEqual([forkedSideChat.id, linkedSideChat.id]);
+    // An archived parent leaves the list, and its side chats stay out with it.
+    expect(filterSidebarV2VisibleThreads([forkedSideChat, linkedSideChat], null)).toEqual([]);
   });
 
   it("identifies subagent threads so the sidebar can hide them", () => {

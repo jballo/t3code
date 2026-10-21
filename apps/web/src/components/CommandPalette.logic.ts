@@ -13,7 +13,6 @@ import * as Result from "effect/Result";
 import { type ReactNode } from "react";
 import { getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
 import { normalizeSearchText } from "../lib/utils";
-import { makeSideChatListingFilter } from "@t3tools/client-runtime/state/thread-workflows";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
@@ -290,7 +289,6 @@ export type BuildThreadActionItemsThread = Pick<
 > & {
   pullRequests?: SidebarThreadSummary["pullRequests"];
   sideChat?: boolean;
-  lineage?: Pick<SidebarThreadSummary["lineage"], "parentThreadId">;
   updatedAt: string;
   latestUserMessageAt?: string | null;
 };
@@ -308,9 +306,8 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
 }): CommandPaletteActionItem[] {
-  const listable = makeSideChatListingFilter(input.threads);
   const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null && listable(thread)),
+    input.threads.filter((thread) => thread.archivedAt === null && thread.sideChat !== true),
     input.sortOrder,
   );
   const visibleThreads =

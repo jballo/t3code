@@ -1,6 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
-import { makeSideChatListingFilter } from "@t3tools/client-runtime/state/thread-workflows";
 import { THREAD_JUMP_KEYBINDING_COMMANDS } from "@t3tools/contracts";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -317,9 +316,8 @@ export function CommandPalette(props: {
           },
         }),
     }));
-    const listable = makeSideChatListingFilter(threads);
     const threadItems: CommandPaletteItem[] = threads
-      .filter((thread) => thread.archivedAt === null && listable(thread))
+      .filter((thread) => thread.archivedAt === null && !thread.sideChat)
       .sort((left, right) =>
         (right.latestUserMessageAt ?? right.updatedAt).localeCompare(
           left.latestUserMessageAt ?? left.updatedAt,

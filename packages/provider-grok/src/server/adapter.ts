@@ -17,6 +17,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
@@ -276,6 +277,9 @@ export function makeGrokAcpAdapterFlavor(
           grokSettings: options.settings,
           environment: options.environment,
           runtimeMode: grokLaunchRuntimeMode(runtimePolicy),
+          readOnly:
+            Predicate.hasProperty(runtimePolicy.sandboxPolicy, "type") &&
+            runtimePolicy.sandboxPolicy.type === "readOnly",
         })),
     // In its Auto mode Grok decides routine actions itself and only asks about
     // what its classifier blocked, so every prompt it sends goes to the user.

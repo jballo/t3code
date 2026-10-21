@@ -61,6 +61,17 @@ describe("grokAcpSpawnArgs", () => {
     expect(grokAcpSpawnArgs("full-access")).toEqual(["agent", "--always-approve", "stdio"]);
   });
 
+  it("gives a read-only Grok its read-only agent profile", () => {
+    expect(grokAcpSpawnArgs("approval-required", "/tmp/t3-read-only.md")).toEqual([
+      "--permission-mode",
+      "default",
+      "agent",
+      "--agent-profile",
+      "/tmp/t3-read-only.md",
+      "stdio",
+    ]);
+  });
+
   it("launches Auto on Grok's classifier and a mode Grok does not offer asking", () => {
     expect(grokAcpSpawnArgs("auto")).toEqual(["--permission-mode", "auto", "agent", "stdio"]);
     expect(grokAcpSpawnArgs("auto-accept-edits")).toEqual([

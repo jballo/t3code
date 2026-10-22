@@ -3326,7 +3326,7 @@ export function ArchivedThreadsPanel() {
       }),
     );
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      // A dismissed side question is archived, but it belongs to its parent's card.
+      // An archived side question still belongs only to its parent's island.
       snapshot.threads
         .filter((thread) => thread.sideChat !== true)
         .map((thread) => ({

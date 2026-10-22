@@ -281,7 +281,7 @@ export function createEnvironmentThreadShellAtoms(input: {
   });
 
   // Side questions never appear in a thread list, so their parent's card is the
-  // only place that reads them: newest first, dismissed (archived) ones included.
+  // only place that reads them: newest first, archived ones included.
   const sideQuestionThreadShellsAtomFamily = Atom.family((key: string) => {
     const ref = parseThreadKey(key);
     let previous: ReadonlyArray<EnvironmentThreadShell> = [];

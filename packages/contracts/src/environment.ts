@@ -124,7 +124,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   threadTitleRegeneration: Schema.optionalKey(Schema.Boolean),
   threadVisitedTracking: Schema.optionalKey(Schema.Boolean),
   threadPullRequestLinking: Schema.optionalKey(Schema.Boolean),
-  /** Server understands sideChat on thread.create / thread.fork / thread.metadata.update
+  /** Server understands sideChat on thread.create / thread.metadata.update
       and parentThreadId on thread.create. Older servers would drop the fields and
       create an ordinary thread, so clients hide side chats instead of sending them. */
   threadSideChats: Schema.optionalKey(Schema.Boolean),

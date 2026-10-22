@@ -89,8 +89,9 @@ Side questions are text only. While the composer holds attachments or context,
 including a large paste that became an attachment, `/btw` is not sent.
 
 The command palette has **Ask a side question**, and `thread.sideQuestion` in
-**Settings → Keybindings** binds a shortcut that puts `/btw ` in the composer. Side
-questions are on web and desktop. Mobile does not show them yet.
+**Settings → Keybindings** binds a shortcut that puts `/btw ` at the start of the
+composer, so a draft you already typed becomes the question. Side questions are on
+web and desktop. Mobile does not show them yet.
 
 ## Queue messages offline on mobile
 

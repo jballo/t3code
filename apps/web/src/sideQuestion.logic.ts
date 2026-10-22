@@ -21,6 +21,11 @@ export function parseSideQuestionCommand(prompt: string): SideQuestionCommand | 
   return question === "" ? { kind: "cycle" } : { kind: "ask", question };
 }
 
+/** Only a prompt that starts with `/btw` asks, so the shortcut prefixes the draft rather than appending. */
+export function sideQuestionPrefixFor(prompt: string): string {
+  return parseSideQuestionCommand(prompt) === null ? "/btw " : "";
+}
+
 type SideQuestionShell = Pick<EnvironmentThreadShell, "id" | "latestRun" | "runtime">;
 
 /** The card shows the newest question, unless the user walked back to an earlier one. */

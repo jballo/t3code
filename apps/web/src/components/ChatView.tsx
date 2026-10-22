@@ -364,6 +364,7 @@ import {
   parseSideQuestionCommand,
   resolveVisibleSideQuestion,
   sideQuestionAfterDelete,
+  sideQuestionPrefixFor,
 } from "../sideQuestion.logic";
 import { selectSideQuestionView, useSideQuestionStore } from "../sideQuestionStore";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
@@ -5893,8 +5894,11 @@ export default function ChatView(props: ChatViewProps) {
   const cycleSideQuestionStable = useStableCallback(cycleSideQuestion);
   const prefillSideQuestion = () => {
     if (!sideQuestionsAvailable) return;
-    composerRef.current?.insertTextAtEnd("/btw ");
-    focusComposerStable();
+    const prefix = sideQuestionPrefixFor(promptRef.current);
+    // An insert focuses the editor once it renders the new text. Focusing now
+    // would move the caret in the old text, and the editor would publish that
+    // old text back over the prefix.
+    if (prefix === "" || !composerRef.current?.insertTextAtStart(prefix)) focusComposerStable();
   };
   const prefillSideQuestionStable = useStableCallback(prefillSideQuestion);
   useEffect(

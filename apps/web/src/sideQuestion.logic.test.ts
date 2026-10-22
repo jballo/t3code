@@ -7,6 +7,7 @@ import {
   resolveVisibleSideQuestion,
   sideQuestionActivity,
   sideQuestionAfterDelete,
+  sideQuestionPrefixFor,
   sideQuestionStepTitle,
 } from "./sideQuestion.logic";
 
@@ -36,6 +37,32 @@ describe("parseSideQuestionCommand", () => {
     expect(parseSideQuestionCommand("/btwx")).toBeNull();
     expect(parseSideQuestionCommand("say /btw later")).toBeNull();
     expect(parseSideQuestionCommand("/compact")).toBeNull();
+  });
+});
+
+describe("sideQuestionPrefixFor", () => {
+  const prefilled = (draft: string) =>
+    parseSideQuestionCommand(sideQuestionPrefixFor(draft) + draft);
+
+  it("turns an empty draft into a bare command", () => {
+    expect(sideQuestionPrefixFor("")).toBe("/btw ");
+    expect(prefilled("")).toEqual({ kind: "cycle" });
+  });
+
+  it("makes an existing draft the question instead of sending it to the main agent", () => {
+    expect(prefilled("refactor the parser")).toEqual({
+      kind: "ask",
+      question: "refactor the parser",
+    });
+    expect(prefilled("say /btw later")).toEqual({ kind: "ask", question: "say /btw later" });
+    expect(prefilled("\nwhy is X slow")).toEqual({ kind: "ask", question: "why is X slow" });
+  });
+
+  it("adds nothing when the draft already asks", () => {
+    expect(sideQuestionPrefixFor("/btw why p-retry?")).toBe("");
+    expect(sideQuestionPrefixFor("  /BTW why p-retry?")).toBe("");
+    expect(sideQuestionPrefixFor("\n/btw")).toBe("");
+    expect(sideQuestionPrefixFor("/btwx")).toBe("/btw ");
   });
 });
 

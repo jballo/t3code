@@ -426,6 +426,11 @@ export interface ProjectionStoreV2Shape {
   readonly getSideQuestionChildThreadIds: (
     parentThreadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
+  /** Side questions still attached to a parent that has been deleted. */
+  readonly getOrphanedSideQuestions: () => Effect.Effect<
+    ReadonlyArray<{ readonly parentThreadId: ThreadId; readonly threadId: ThreadId }>,
+    ProjectionStoreV2Error
+  >;
   readonly getThreadWorktreePaths: () => Effect.Effect<
     ReadonlyArray<{ readonly threadId: ThreadId; readonly worktreePath: string }>,
     ProjectionStoreV2Error
@@ -5714,6 +5719,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
       );
 
+    const getOrphanedSideQuestions: ProjectionStoreV2Shape["getOrphanedSideQuestions"] = () =>
+      sql<{ readonly parent_thread_id: string; readonly thread_id: string }>`
+          SELECT parent.thread_id AS parent_thread_id, child.thread_id
+          FROM orchestration_v2_projection_threads AS child
+          JOIN orchestration_v2_projection_threads AS parent
+            ON parent.thread_id = json_extract(child.payload_json, '$.lineage.parentThreadId')
+          WHERE child.deleted_at IS NULL
+            AND json_extract(child.payload_json, '$.sideChat') = 1
+            AND parent.deleted_at IS NOT NULL
+          ORDER BY child.thread_id ASC
+        `.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            parentThreadId: ThreadId.make(row.parent_thread_id),
+            threadId: ThreadId.make(row.thread_id),
+          })),
+        ),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const getThreadsWithPullRequests: ProjectionStoreV2Shape["getThreadsWithPullRequests"] = (
       threadId,
     ) =>
@@ -6091,6 +6116,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getSettlementCandidates,
       getThreadsWithPullRequests,
       getSideQuestionChildThreadIds,
+      getOrphanedSideQuestions,
       getThreadWorktreePaths,
       getThreadProjection,
       getTurnStartContext,
@@ -6268,6 +6294,26 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               .map((thread) => thread.id)
               .toSorted(),
           ),
+        ),
+      getOrphanedSideQuestions: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) => {
+            const threads = [...state.projections.values()].map(({ thread }) => thread);
+            const deletedIds = new Set(
+              threads.filter((thread) => thread.deletedAt !== null).map((thread) => thread.id),
+            );
+            return threads
+              .flatMap((thread) => {
+                const parentThreadId = thread.lineage.parentThreadId;
+                return thread.deletedAt === null &&
+                  thread.sideChat === true &&
+                  parentThreadId !== null &&
+                  deletedIds.has(parentThreadId)
+                  ? [{ parentThreadId, threadId: thread.id }]
+                  : [];
+              })
+              .toSorted((left, right) => left.threadId.localeCompare(right.threadId));
+          }),
         ),
       getThreadsWithPullRequests: (threadId) =>
         Ref.get(replayState).pipe(

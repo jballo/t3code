@@ -871,6 +871,67 @@ it.effect("deleting a thread deletes its side questions but keeps a promoted one
   }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
 );
 
+it.effect("deletes the side questions of a thread deleted while nothing reacted", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* SideQuestionReactor.SideQuestionReactor;
+    const parentId = ThreadId.make("thread:side-question-missed-parent");
+    const attachedId = ThreadId.make("thread:side-question-missed-attached");
+    const promotedId = ThreadId.make("thread:side-question-missed-promoted");
+    const base = {
+      projectId: ProjectId.make("project:side-question-missed"),
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("missed-create-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    for (const [commandId, threadId] of [
+      ["missed-create-attached", attachedId],
+      ["missed-create-promoted", promotedId],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(commandId),
+        threadId,
+        title: "Side question",
+        parentThreadId: parentId,
+        sideChat: true,
+        ...base,
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("missed-promote"),
+      threadId: promotedId,
+      sideChat: false,
+    });
+
+    // The server stopped before the reactor saw this delete.
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("missed-delete-parent"),
+      threadId: parentId,
+    });
+    assert.isNull((yield* projections.getThread(attachedId)).deletedAt);
+
+    yield* reactor.reconcile();
+
+    assert.isNotNull((yield* projections.getThread(attachedId)).deletedAt);
+    assert.isNull((yield* projections.getThread(promotedId)).deletedAt);
+  }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
+);
+
 it.effect("wakes the parent once when its delegated task asks a question", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;

@@ -3326,7 +3326,7 @@ export function ArchivedThreadsPanel() {
       }),
     );
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      // An archived side question still belongs only to its parent's island.
+      // Side questions are never listed on their own, even archived ones.
       snapshot.threads
         .filter((thread) => thread.sideChat !== true)
         .map((thread) => ({

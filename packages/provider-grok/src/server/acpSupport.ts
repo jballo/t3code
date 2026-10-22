@@ -66,10 +66,11 @@ export function grokAcpSpawnArgs(
 }
 
 /**
- * `grok agent` ignores `--sandbox` and `--deny`, and its ask mode still
- * writes files, runs commands and calls MCP tools without asking, so a
- * read-only session gets an agent profile whose only tools read. Grok adds its
- * MCP gateway tools to any allowlist, so the profile removes them by name.
+ * With Grok 1.0.62, a user's Claude `permissions.defaultMode: "auto"` can
+ * override `--permission-mode default`, so Grok edits and runs commands without
+ * asking, and `--deny` rules don't stop it. A read-only session therefore gets
+ * an agent profile whose only tools read. Grok adds its MCP gateway tools to
+ * any allowlist, so the profile removes them by name.
  */
 const GROK_READ_ONLY_AGENT_PROFILE = `---
 name: t3-read-only

@@ -5813,8 +5813,13 @@ export default function ChatView(props: ChatViewProps) {
   const canAskSideQuestion = useAtomValue(
     orchestrationEnvironment.askSideQuestion.permissionAtom(environmentId),
   );
+  // A side question opened directly can't be a parent; the server refuses it.
   const sideQuestionsAvailable =
-    sideQuestionsSupported && canAskSideQuestion && isServerThread && canOperateThread;
+    sideQuestionsSupported &&
+    canAskSideQuestion &&
+    isServerThread &&
+    canOperateThread &&
+    serverThread?.sideChat !== true;
   const sideQuestionParentRef = sideQuestionsSupported && isServerThread ? activeThreadRef : null;
   const sideQuestionParentKey =
     sideQuestionParentRef === null ? null : scopedThreadKey(sideQuestionParentRef);

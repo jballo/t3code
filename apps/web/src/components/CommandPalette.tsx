@@ -1746,7 +1746,12 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread !== null && sideQuestionsSupported && canAskSideQuestion) {
+  if (
+    activeThread !== null &&
+    activeThread.sideChat !== true &&
+    sideQuestionsSupported &&
+    canAskSideQuestion
+  ) {
     actionItems.push({
       kind: "action",
       value: "action:side-question",

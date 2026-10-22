@@ -19,13 +19,13 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import {
   normalizeAcpRegistryCommands,
@@ -82,10 +82,7 @@ export interface AcpRegistryAdapterV2Options {
  */
 const claudeAgentModeForPolicy: NonNullable<AcpAdapterV2Flavor["sessionModeForPolicy"]> = (
   policy,
-) =>
-  Predicate.hasProperty(policy.sandboxPolicy, "type") && policy.sandboxPolicy.type === "readOnly"
-    ? "default"
-    : undefined;
+) => (ProviderAdapter.isReadOnlySandboxPolicy(policy.sandboxPolicy) ? "default" : undefined);
 
 // Mistral Vibe: its application error code for rate limits (not an ACP code).
 const MISTRAL_VIBE_RATE_LIMITED = -31001;

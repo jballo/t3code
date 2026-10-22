@@ -5881,7 +5881,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           // mode it picked (bypass) would skip the permission requests that
           // keep a read-only sandbox from writing. It runs in the agent's
           // default mode instead, which asks.
-          const readOnly = unknownRecord(runtimePolicy.sandboxPolicy)?.type === "readOnly";
+          const readOnly = ProviderAdapter.isReadOnlySandboxPolicy(runtimePolicy.sandboxPolicy);
           const modeSelection =
             hasNativeConfigWithSyntheticModeId || readOnly
               ? undefined

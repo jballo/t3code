@@ -250,11 +250,6 @@ const nativeRef = (nativeId: string) => ({
   strength: "strong" as const,
 });
 const recordSchema = Schema.Record(Schema.String, Schema.Unknown);
-const isReadOnlySandbox = (sandboxPolicy: unknown): boolean =>
-  typeof sandboxPolicy === "object" &&
-  sandboxPolicy !== null &&
-  "type" in sandboxPolicy &&
-  sandboxPolicy.type === "readOnly";
 const INFORMATIONAL_NOTIFICATIONS = new Set([
   "session/contextUsage",
   "session/tokenUsage",
@@ -1631,7 +1626,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
               // A side question's read-only sandbox; the host is relaunched when it changes.
-              disableWrite: isReadOnlySandbox(input.runtimePolicy.sandboxPolicy),
+              disableWrite: ProviderAdapter.isReadOnlySandboxPolicy(
+                input.runtimePolicy.sandboxPolicy,
+              ),
             },
             options.createHost,
           ).pipe(

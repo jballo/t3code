@@ -316,11 +316,6 @@ type RulesPolicy = Pick<
   "runtimeMode" | "interactionMode" | "sandboxPolicy"
 >;
 
-const isReadOnlySandbox = (sandboxPolicy: RulesPolicy["sandboxPolicy"]): boolean =>
-  typeof sandboxPolicy === "object" &&
-  sandboxPolicy !== null &&
-  "type" in sandboxPolicy &&
-  sandboxPolicy.type === "readOnly";
 type NativeForm = EventOf<"form.created">["data"]["form"];
 
 interface PendingRequest {
@@ -393,7 +388,7 @@ export const sessionRules = (
   // A read-only sandbox (a side question) denies edits after `paths`, so no
   // agent path rule allows one back; its shell stays "ask", and the side
   // question reactor declines what it asks.
-  ...(isReadOnlySandbox(policy.sandboxPolicy) ? [rule("edit", "deny")] : []),
+  ...(ProviderAdapter.isReadOnlySandboxPolicy(policy.sandboxPolicy) ? [rule("edit", "deny")] : []),
   ...mcpRules(mcpServerName),
 ];
 

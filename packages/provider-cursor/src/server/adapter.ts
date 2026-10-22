@@ -315,15 +315,6 @@ const CURSOR_READ_ONLY_TOOLS = [
   "webFetch",
 ] as const;
 
-function cursorReadOnlySandbox(runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy) {
-  return (
-    typeof runtimePolicy.sandboxPolicy === "object" &&
-    runtimePolicy.sandboxPolicy !== null &&
-    "type" in runtimePolicy.sandboxPolicy &&
-    runtimePolicy.sandboxPolicy.type === "readOnly"
-  );
-}
-
 export function makeCursorAgentOptions(input: {
   readonly apiKey?: string;
   readonly modelSelection: ModelSelection;
@@ -337,7 +328,9 @@ export function makeCursorAgentOptions(input: {
     model: cursorSdkModelSelection(input.modelSelection),
     name: `T3 Code ${input.threadId}`,
     mode: input.runtimePolicy.interactionMode === "plan" ? "plan" : "agent",
-    ...(cursorReadOnlySandbox(input.runtimePolicy) ? { tools: [...CURSOR_READ_ONLY_TOOLS] } : {}),
+    ...(ProviderAdapter.isReadOnlySandboxPolicy(input.runtimePolicy.sandboxPolicy)
+      ? { tools: [...CURSOR_READ_ONLY_TOOLS] }
+      : {}),
     ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     local: {
       ...(input.runtimePolicy.cwd === null ? {} : { cwd: input.runtimePolicy.cwd }),

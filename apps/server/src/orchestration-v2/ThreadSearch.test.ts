@@ -59,8 +59,14 @@ const createProject = (projectId: ProjectId) =>
 const thread = (
   threadId: ThreadId,
   projectId: ProjectId,
-  overrides: { readonly archivedAt?: DateTime.Utc; readonly deletedAt?: DateTime.Utc } = {},
-): OrchestrationV2DomainEvent => ({
+  overrides: {
+    readonly archivedAt?: DateTime.Utc;
+    readonly deletedAt?: DateTime.Utc;
+    readonly updatedAt?: DateTime.Utc;
+    readonly sideChatOf?: ThreadId;
+    readonly sideChat?: boolean;
+  } = {},
+): Extract<OrchestrationV2DomainEvent, { readonly type: "thread.created" }> => ({
   id: EventId.make(`created:${threadId}`),
   type: "thread.created",
   threadId,
@@ -79,10 +85,18 @@ const thread = (
     branch: null,
     worktreePath: null,
     activeProviderThreadId: null,
-    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+    lineage:
+      overrides.sideChatOf === undefined
+        ? { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId }
+        : {
+            parentThreadId: overrides.sideChatOf,
+            relationshipToParent: null,
+            rootThreadId: overrides.sideChatOf,
+          },
+    ...(overrides.sideChat === undefined ? {} : { sideChat: overrides.sideChat }),
     forkedFrom: null,
     createdAt: at(0),
-    updatedAt: at(0),
+    updatedAt: overrides.updatedAt ?? at(0),
     archivedAt: overrides.archivedAt ?? null,
     settledOverride: null,
     settledAt: null,
@@ -176,6 +190,49 @@ it.layer(layerTest)("ThreadSearch", (it) => {
       );
       assert.lengthOf((yield* search.search({ query: "needle", limit: 1 })).matches, 1);
       assert.deepEqual((yield* search.search({ query: "ne%le" })).matches, []);
+    }),
+  );
+
+  it.effect("leaves /btw side questions out until they are promoted", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const search = yield* ThreadSearch.ThreadSearch;
+      const project = ProjectId.make("project:search-side");
+      const parent = ThreadId.make("thread:side-parent");
+      const side = ThreadId.make("thread:side-child");
+      const sideChat = { sideChatOf: parent, sideChat: true, updatedAt: at(5) } as const;
+      yield* createProject(project);
+      yield* Effect.forEach(
+        [
+          thread(parent, project),
+          message(parent, "side-parent", "user", "where does the haystack live?"),
+          // A side question carries the parent transcript in its first user
+          // message and is newer, so it would outrank the parent.
+          thread(side, project, sideChat),
+          message(side, "side-child", "user", "Context: where does the haystack live?", {
+            minute: 5,
+          }),
+        ],
+        projections.apply,
+        { discard: true },
+      );
+
+      const hidden = yield* search.search({ query: "haystack", limit: 1 });
+      assert.deepEqual(
+        hidden.matches.map((match) => match.threadId),
+        [parent],
+      );
+
+      yield* projections.apply({
+        ...thread(side, project, { ...sideChat, sideChat: false }),
+        id: EventId.make("promoted:side"),
+        type: "thread.metadata-updated",
+      });
+      const promoted = yield* search.search({ query: "haystack" });
+      assert.deepEqual(
+        promoted.matches.map((match) => match.threadId),
+        [side, parent],
+      );
     }),
   );
 

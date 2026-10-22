@@ -5886,18 +5886,6 @@ export default function ChatView(props: ChatViewProps) {
     );
   };
   const cycleSideQuestionStable = useStableCallback(cycleSideQuestion);
-  // Picking the command shows what is already there, folded or dismissed,
-  // without moving off the question the card is on.
-  const revealSideQuestions = () => {
-    if (sideQuestionParentKey === null) return false;
-    const shown =
-      resolveVisibleSideQuestion(sideQuestionShells, sideQuestionViewingId) ??
-      sideQuestionShells[0];
-    if (shown === undefined) return false;
-    showSideQuestion(sideQuestionParentKey, shown.id);
-    return true;
-  };
-  const revealSideQuestionsStable = useStableCallback(revealSideQuestions);
   const prefillSideQuestion = () => {
     if (!sideQuestionsAvailable) return;
     composerRef.current?.insertTextAtEnd("/btw ");
@@ -8415,7 +8403,6 @@ export default function ChatView(props: ChatViewProps) {
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}
                               sideQuestionsAvailable={sideQuestionsAvailable}
-                              onSideQuestionPicked={revealSideQuestionsStable}
                               onUsageLimitsCommand={
                                 usageLimitsOffered &&
                                 usageLimitsKey !== null &&

@@ -5845,6 +5845,20 @@ export default function ChatView(props: ChatViewProps) {
     });
     if (result._tag === "Failure") {
       clearSideQuestionViewing(sideQuestionParentKey);
+      // The draft was cleared on send; give the question back unless something
+      // new was typed since.
+      if (promptRef.current.trim() === "") {
+        const restored = `/btw ${question}`;
+        setComposerDraftPrompt(composerDraftTarget, restored);
+        if (composerRef.current && currentRouteThreadKeyRef.current === routeThreadKey) {
+          promptRef.current = restored;
+          composerRef.current.resetCursorState({
+            cursor: collapseExpandedComposerCursor(restored, restored.length),
+            prompt: restored,
+            detectTrigger: true,
+          });
+        }
+      }
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         setThreadError(
@@ -6106,6 +6120,19 @@ export default function ChatView(props: ChatViewProps) {
     // ride along, and nothing is sent to this thread. It is decided before the
     // pending-answer branch so it still works while the thread waits on a
     // question, which is the best moment to ask one.
+    const notifyEnvironmentUnavailable = () => {
+      const toastSlot = environmentUnavailableSendToastSlotRef.current;
+      environmentUnavailableSendToastSlotRef.current =
+        (toastSlot + 1) % ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE;
+      toastManager.add({
+        ...stackedThreadToast({
+          type: "warning",
+          title: "Not connected: message not sent",
+          description: "Reconnecting to the environment. Try again once it is connected.",
+        }),
+        id: `chat-send-environment-unavailable:${toastSlot}`,
+      });
+    };
     const sideQuestionCommand = sideQuestionsAvailable
       ? parseSideQuestionCommand(promptRef.current)
       : null;
@@ -6120,6 +6147,10 @@ export default function ChatView(props: ChatViewProps) {
             "Remove the attachments and context to ask one, or delete /btw to send your message to the main agent.",
         }),
       );
+      return;
+    }
+    if (sideQuestionCommand?.kind === "ask" && activeEnvironmentUnavailable) {
+      notifyEnvironmentUnavailable();
       return;
     }
     if (sideQuestionCommand !== null) {
@@ -6172,17 +6203,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     if (activeEnvironmentUnavailable) {
-      const toastSlot = environmentUnavailableSendToastSlotRef.current;
-      environmentUnavailableSendToastSlotRef.current =
-        (toastSlot + 1) % ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE;
-      toastManager.add({
-        ...stackedThreadToast({
-          type: "warning",
-          title: "Not connected: message not sent",
-          description: "Reconnecting to the environment. Try again once it is connected.",
-        }),
-        id: `chat-send-environment-unavailable:${toastSlot}`,
-      });
+      notifyEnvironmentUnavailable();
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();

@@ -42,6 +42,12 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("requires operate access to ask a side question, since it starts a provider turn", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_V2_WS_METHODS.askSideQuestion)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("authorizes background policy reporting and observation deliberately", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.serverReportClientActivity)).toBe(
       AuthOrchestrationReadScope,

@@ -85,6 +85,9 @@ hides the card without losing anything, and a bare `/btw` brings it back and wal
 through earlier questions. The trash icon deletes the question you're looking at.
 Deleting the thread deletes its side questions; a forked one stays.
 
+Side questions are text only. While the composer holds attachments or context,
+including a large paste that became an attachment, `/btw` is not sent.
+
 The command palette has **Ask a side question**, and `thread.sideQuestion` in
 **Settings → Keybindings** binds a shortcut that puts `/btw ` in the composer. Side
 questions are on web and desktop. Mobile does not show them yet.

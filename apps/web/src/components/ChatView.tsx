@@ -6106,10 +6106,22 @@ export default function ChatView(props: ChatViewProps) {
     // ride along, and nothing is sent to this thread. It is decided before the
     // pending-answer branch so it still works while the thread waits on a
     // question, which is the best moment to ask one.
-    const sideQuestionCommand =
-      sideQuestionsAvailable && !directAnnotation && !composerHasNonPromptContent
-        ? parseSideQuestionCommand(promptRef.current)
-        : null;
+    const sideQuestionCommand = sideQuestionsAvailable
+      ? parseSideQuestionCommand(promptRef.current)
+      : null;
+    // Side questions are text only. Sending anyway would hand the `/btw` text
+    // and the attachments to the main agent, so the draft stays as it is.
+    if (sideQuestionCommand !== null && (directAnnotation || composerHasNonPromptContent)) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "Side questions are text only",
+          description:
+            "Remove the attachments and context to ask one, or delete /btw to send your message to the main agent.",
+        }),
+      );
+      return;
+    }
     if (sideQuestionCommand !== null) {
       promptRef.current = "";
       setComposerDraftPrompt(composerDraftTarget, "");

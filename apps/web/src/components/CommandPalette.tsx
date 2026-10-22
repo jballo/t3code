@@ -136,7 +136,14 @@ import {
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
+import {
+  useEnvironmentSupportsSideQuestions,
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+  waitForProject,
+} from "../state/entities";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -775,6 +782,12 @@ function OpenCommandPaletteDialog(props: {
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(referenceThreadRef);
   const activeThreadServerConfig = useServerConfigs().get(
     activeThread?.environmentId ?? ("" as EnvironmentId),
+  );
+  const sideQuestionsSupported = useEnvironmentSupportsSideQuestions(
+    activeThread?.environmentId ?? null,
+  );
+  const canAskSideQuestion = useAtomValue(
+    orchestrationEnvironment.askSideQuestion.permissionAtom(activeThread?.environmentId ?? null),
   );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
@@ -1733,10 +1746,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (
-    activeThread !== null &&
-    activeThreadServerConfig?.environment.capabilities.threadSideChats === true
-  ) {
+  if (activeThread !== null && sideQuestionsSupported && canAskSideQuestion) {
     actionItems.push({
       kind: "action",
       value: "action:side-question",

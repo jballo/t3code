@@ -341,12 +341,19 @@ export interface ProjectionTimelinePageOptions {
   readonly itemId?: TurnItemId;
   readonly view?: "messages" | "activity";
   readonly limit: number;
+  /** Take the last `limit` matches. `hasMore` then means older ones were left out. */
+  readonly fromEnd?: boolean;
 }
 export interface ProjectionTimelinePage {
   readonly items: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
   readonly totalItems: number;
   readonly hasMore: boolean;
 }
+
+const pageOfTimeline = <A>(matching: ReadonlyArray<A>, options: ProjectionTimelinePageOptions) =>
+  options.fromEnd === true
+    ? matching.slice(Math.max(0, matching.length - options.limit))
+    : matching.slice(0, options.limit);
 
 export interface ShellSnapshotOptions {
   readonly location?: "active" | "archive";
@@ -5165,7 +5172,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       ))
                   : row.sourceItemId === options.itemId,
               );
-            const page = matching.slice(0, options.limit);
+            const page = pageOfTimeline(matching, options);
             const items = yield* Effect.forEach(page, (row) =>
               Effect.gen(function* () {
                 if (row.synthetic !== undefined)
@@ -6851,7 +6858,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 : row.sourceItemId === options.itemId,
             );
             return {
-              items: matching.slice(0, options.limit),
+              items: pageOfTimeline(matching, options),
               totalItems: projection.visibleTurnItems.length,
               hasMore: matching.length > options.limit,
             };

@@ -79,7 +79,7 @@ const timeline: ReadonlyArray<OrchestrationV2ProjectedTurnItem> = [
 function layerFor(input: {
   readonly parent: OrchestrationV2AppThread | null;
   readonly commands: Array<OrchestrationV2ServerCommand>;
-  readonly pages: Array<{ readonly limit: number; readonly afterPosition: number | undefined }>;
+  readonly pages: Array<{ readonly limit: number; readonly fromEnd: boolean | undefined }>;
   readonly providerDisabled?: boolean;
   readonly failCommand?: OrchestrationV2ServerCommand["type"];
 }) {
@@ -96,12 +96,8 @@ function layerFor(input: {
                 }),
               )) as never,
         getTimelinePage: (_threadId, options) => {
-          input.pages.push({ limit: options.limit, afterPosition: options.afterPosition });
-          return Effect.succeed(
-            options.limit === 1
-              ? { items: [], totalItems: timeline.length, hasMore: true }
-              : { items: timeline, totalItems: timeline.length, hasMore: false },
-          );
+          input.pages.push({ limit: options.limit, fromEnd: options.fromEnd });
+          return Effect.succeed({ items: timeline, totalItems: timeline.length, hasMore: false });
         },
         assertProviderInstanceEnabled: (check) =>
           input.providerDisabled === true
@@ -141,7 +137,7 @@ const askInput = {
 it.effect("creates a read-only child under the parent and sends it the snapshot", () =>
   Effect.gen(function* () {
     const commands: Array<OrchestrationV2ServerCommand> = [];
-    const pages: Array<{ limit: number; afterPosition: number | undefined }> = [];
+    const pages: Array<{ limit: number; fromEnd: boolean | undefined }> = [];
     const service = yield* SideQuestionService.SideQuestionService.pipe(
       Effect.provide(layerFor({ parent: makeParent(), commands, pages })),
     );
@@ -149,11 +145,7 @@ it.effect("creates a read-only child under the parent and sends it the snapshot"
     const result = yield* service.ask(askInput);
     assert.equal(result.threadId, askInput.threadId);
 
-    // The tail of the timeline: a probe for the total, then the last page.
-    assert.deepEqual(pages, [
-      { limit: 1, afterPosition: undefined },
-      { limit: 400, afterPosition: -1 },
-    ]);
+    assert.deepEqual(pages, [{ limit: 400, fromEnd: true }]);
 
     assert.equal(commands.length, 2);
     const create = commands[0]!;

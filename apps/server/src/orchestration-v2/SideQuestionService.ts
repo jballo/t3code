@@ -140,16 +140,8 @@ const make = Effect.gen(function* () {
           ),
         );
 
-      // Two reads: the page API walks forward, and the snapshot wants the tail.
-      const head = yield* threadManagement
-        .getTimelinePage(parent.id, { view: "activity", limit: 1 })
-        .pipe(Effect.mapError(askError("load_parent")));
       const page = yield* threadManagement
-        .getTimelinePage(parent.id, {
-          view: "activity",
-          limit: TIMELINE_ITEM_LIMIT,
-          afterPosition: Math.max(-1, head.totalItems - TIMELINE_ITEM_LIMIT - 1),
-        })
+        .getTimelinePage(parent.id, { view: "activity", limit: TIMELINE_ITEM_LIMIT, fromEnd: true })
         .pipe(Effect.mapError(askError("load_parent")));
 
       const text = buildSideQuestionPrompt({

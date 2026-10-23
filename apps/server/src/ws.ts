@@ -980,7 +980,9 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   function* (input: {
     readonly afterSequence?: number;
     readonly requestCompletionMarker?: boolean;
+    readonly acceptSideChats?: boolean;
   }) {
+    const acceptSideChats = input.acceptSideChats === true;
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
@@ -1008,14 +1010,15 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       },
     );
     const loadSnapshot = Effect.fn("ws.orchestrationV2.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
+      const base = buildActiveShellSnapshot({
+        ...(yield* loadShellSnapshotParts({
           sql,
           readThreads: threadManagement.readShellSnapshot({ location: "active" }),
           listProjects: projects.listShells(),
           latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
+        })),
+        acceptSideChats,
+      });
       subagentThreadIds = new Set(
         base.threads
           .filter((thread) => thread.lineage.relationshipToParent === "subagent")
@@ -1055,7 +1058,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const projectShellItems = Effect.fn("ws.orchestrationV2.projectShellItems")(function* (
       events: ReadonlyArray<ShellApplicationEvent>,
     ) {
-      return yield* Effect.forEach(
+      const items = yield* Effect.forEach(
         coalesceShellApplicationEvents(events),
         (stored) =>
           Effect.gen(function* () {
@@ -1063,10 +1066,12 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
               return yield* projectItem(stored);
             }
             const shell = yield* threadManagement.getThreadShell(stored.event.threadId);
+            if (!acceptSideChats && shell?.sideChat === true) return null;
             return shellStreamItemFromThreadShell({ stored, shell });
           }),
         { concurrency: 8 },
       );
+      return items.filter((item) => item !== null);
     });
 
     const toShellStream = <E, R>(stream: Stream.Stream<ShellApplicationEvent, E, R>) =>

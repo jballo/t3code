@@ -3233,6 +3233,9 @@ export type OrchestrationV2GetThreadProjectionInput =
 export const OrchestrationV2SubscribeShellInput = Schema.Struct({
   afterSequence: Schema.optionalKey(NonNegativeInt),
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
+  /** Clients from before side chats ignore `sideChat` and would list every one as a
+      thread, so the server leaves them out unless the client opts in. */
+  acceptSideChats: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationV2SubscribeShellInput = typeof OrchestrationV2SubscribeShellInput.Type;
 

@@ -4,6 +4,8 @@ import {
   AuthSessionId,
   EnvironmentId,
   ProjectId,
+  EventId,
+  OrchestrationV2AppThread,
   ThreadId,
   WS_METHODS,
   WsSubscribeServerConfigRpc,
@@ -12,11 +14,14 @@ import {
   type ServerConfig,
   type ServerConfigStreamEvent,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { Headers } from "effect/http";
 import { RpcGroup, RpcMessage, RpcServer } from "effect/rpc";
@@ -96,7 +101,11 @@ import * as ServerConfigModule from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerSettings from "./serverSettings.ts";
 
+import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
+import { EventSinkV2 } from "./orchestration-v2/EventSink.ts";
 import * as EventStore from "./orchestration-v2/EventStore.ts";
+import * as ProviderAdapterRegistry from "./orchestration-v2/ProviderAdapterRegistry.ts";
+import * as ProviderReplayHarness from "./orchestration-v2/testkit/ProviderReplayHarness.ts";
 import * as ProjectionMaintenance from "./orchestration-v2/ProjectionMaintenance.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
@@ -288,6 +297,143 @@ it.live.each(["thread", "shell"] as const)(
         [after!.sequence, liveSequence],
       );
     }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
+);
+
+const sideChatNow = DateTime.makeUnsafe("2026-10-22T00:00:00.000Z");
+const sideChatParent = Schema.decodeUnknownSync(OrchestrationV2AppThread)({
+  id: "parent",
+  projectId: "project",
+  title: "Parent",
+  providerInstanceId: "codex",
+  modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+  branch: null,
+  worktreePath: null,
+  activeProviderThreadId: null,
+  lineage: { rootThreadId: "parent", parentThreadId: null, relationshipToParent: null },
+  forkedFrom: null,
+  createdBy: "user",
+  creationSource: "web",
+  createdAt: sideChatNow,
+  updatedAt: sideChatNow,
+  archivedAt: null,
+  settledOverride: null,
+  settledAt: null,
+  lastVisitedAt: null,
+  deletedAt: null,
+});
+const sideChat: OrchestrationV2AppThread = {
+  ...sideChatParent,
+  id: ThreadId.make("side-chat"),
+  title: "What does this do?",
+  lineage: {
+    rootThreadId: sideChatParent.id,
+    parentThreadId: sideChatParent.id,
+    relationshipToParent: "fork",
+  },
+  sideChat: true,
+};
+
+// Live clock: the shell tail batches with groupedWithin, whose timer starts on the
+// stream's own fiber once an event arrives, so a TestClock.adjust here would race it.
+it.live("leaves side chats out of the shell stream unless the client accepts them", () =>
+  Effect.gen(function* () {
+    const collect = Effect.fn(function* (acceptSideChats: boolean) {
+      const runtime = ProviderReplayHarness.layerWithRegistry(
+        { name: "shell-side-chats" },
+        ProviderAdapterRegistry.layerFromAdapters([]),
+        { runEffectWorker: false },
+      );
+      const services = yield* Layer.build(
+        Layer.mergeAll(
+          runtime,
+          ThreadManagement.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(runtime, CommandReceiptStore.layer, ServerSettings.layerTest({})),
+            ),
+          ),
+          OrchestrationEventStore.layer,
+          ProjectStore.layer,
+        ).pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+      );
+      const eventSink = Context.get(services, EventSinkV2);
+      let written = 0;
+      const write = (
+        type: "thread.created" | "thread.metadata-updated",
+        thread: typeof sideChatParent,
+      ) =>
+        eventSink.write({
+          events: [
+            {
+              id: EventId.make(`event-${++written}`),
+              type,
+              threadId: thread.id,
+              occurredAt: sideChatNow,
+              payload: thread,
+            },
+          ],
+        });
+      yield* write("thread.created", sideChatParent);
+      yield* write("thread.created", sideChat);
+
+      const stream = yield* subscribeOrchestrationV2Shell({
+        acceptSideChats,
+        requestCompletionMarker: true,
+      }).pipe(
+        Effect.provideService(ProjectService.ProjectService, {
+          getShell: () => Effect.succeedNone,
+        } as unknown as ProjectService.ProjectService["Service"]),
+        Effect.provideService(ProjectEnrichment.ProjectEnrichmentService, {
+          subscribeChanges: PubSub.subscribe(yield* PubSub.unbounded<never>()),
+        } as unknown as ProjectEnrichment.ProjectEnrichmentService["Service"]),
+        Effect.provide(services),
+      );
+      const items = yield* stream.pipe(
+        Stream.tap((item) => {
+          if (item.kind === "synchronized") {
+            return Effect.andThen(
+              write("thread.metadata-updated", { ...sideChat, title: "Renamed side chat" }),
+              write("thread.metadata-updated", { ...sideChatParent, title: "Renamed parent" }),
+            );
+          }
+          // A promoted side question is an ordinary thread for every client.
+          return item.kind === "thread.updated" && item.thread.id === sideChatParent.id
+            ? write("thread.metadata-updated", { ...sideChat, sideChat: false })
+            : Effect.void;
+        }),
+        Stream.takeUntil(
+          (item) =>
+            item.kind === "thread.updated" &&
+            item.thread.id === sideChat.id &&
+            item.thread.sideChat === false,
+        ),
+        Stream.runCollect,
+        Effect.provide(services),
+      );
+      return Array.from(items, (item) =>
+        item.kind === "snapshot"
+          ? `snapshot:${item.snapshot.threads.map((thread) => thread.id).join(",")}`
+          : item.kind === "thread.updated"
+            ? `updated:${item.thread.id}:${item.thread.sideChat === true ? "side" : "listed"}`
+            : item.kind,
+      );
+    });
+
+    assert.deepEqual(yield* collect(false), [
+      "snapshot:parent",
+      "synchronized",
+      "updated:parent:listed",
+      "updated:side-chat:listed",
+    ]);
+    assert.deepEqual(yield* collect(true), [
+      "snapshot:parent,side-chat",
+      "synchronized",
+      "updated:side-chat:side",
+      "updated:parent:listed",
+      "updated:side-chat:listed",
+    ]);
+  }).pipe(Effect.scoped),
 );
 
 // Build the production RPC layer; unrelated capabilities fail if this test calls them.

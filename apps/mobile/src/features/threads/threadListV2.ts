@@ -206,7 +206,13 @@ export function getThreadListV2OrderedSection(input: {
 }): EnvironmentThreadShell[] {
   const queuedThreadKeys = input.queuedThreadKeys?.size ? input.queuedThreadKeys : undefined;
   const threads = input.threads.filter((thread) => {
-    if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
+    // Callers plan moves from the full shell list; side chats never render in
+    // the list, so they must not become a move neighbour or receive a key.
+    if (
+      thread.archivedAt !== null ||
+      thread.lineage.relationshipToParent === "subagent" ||
+      thread.sideChat
+    )
       return false;
     if (
       (input.settlementEnvironmentIds?.has(thread.environmentId) ?? true) &&

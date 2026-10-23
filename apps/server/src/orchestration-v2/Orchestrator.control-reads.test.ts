@@ -1264,3 +1264,57 @@ it.effect("wakes the parent once when its delegated task asks a question", () =>
     });
   }).pipe(Effect.provide(DelegatedTaskQuestionReactor.layer.pipe(Layer.provideMerge(layerTest)))),
 );
+
+it.effect("a side chat is only ever a new thread, never an existing or deleted one", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const base = {
+      projectId: ProjectId.make("project:side-chat-reuse"),
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    const parentId = ThreadId.make("thread:side-chat-reuse-parent");
+    const liveId = ThreadId.make("thread:side-chat-reuse-live");
+    const deletedId = ThreadId.make("thread:side-chat-reuse-deleted");
+    for (const [threadId, title] of [
+      [parentId, "Parent"],
+      [liveId, "Live"],
+      [deletedId, "Deleted"],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create-${threadId}`),
+        threadId,
+        title,
+        ...base,
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("delete-side-chat-reuse"),
+      threadId: deletedId,
+    });
+
+    for (const threadId of [liveId, deletedId]) {
+      const reused = yield* Effect.exit(
+        orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`reuse-${threadId}`),
+          threadId,
+          title: "Side chat",
+          parentThreadId: parentId,
+          sideChat: true,
+          ...base,
+        }),
+      );
+      assert.equal(reused._tag, "Failure");
+      assert.notEqual((yield* projections.getThread(threadId)).sideChat, true);
+    }
+  }).pipe(Effect.provide(layerTest)),
+);

@@ -2,6 +2,7 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
@@ -71,6 +72,10 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as RuntimeLayer from "./runtimeLayer.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
@@ -5853,3 +5858,95 @@ it.layer(layerQueueResumeDisabledInstanceTest)(
     );
   },
 );
+
+const layerScheduledTaskBindingTest = ScheduledTaskService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+      Scheduler.layer,
+      NodeCrypto.layer,
+    ),
+  ),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      RuntimeLayer.layer,
+      RuntimeLayer.layerEventSink,
+      ProjectStore.layer,
+      ProjectionStore.layer,
+      EffectOutbox.layer,
+      ThreadCommandExecutor.layer,
+    ),
+  ),
+  Layer.provide(McpSessionRegistryTestkit.layer),
+  Layer.provide(McpProviderSessions.layer),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
+  Layer.provide(layerCheckpointStoreTest),
+  Layer.provide(layerServerConfig),
+  Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(layerTestProviderInstanceRegistry),
+  Layer.provide(layerGitWorkflowTest),
+  Layer.provide(layerProjectServiceTest),
+  Layer.provide(layerPlatformTest),
+);
+
+it.layer(layerScheduledTaskBindingTest)("scheduled task bindings", (it) => {
+  it.effect("no binding ever reaches a side question, whichever is created first", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+      const projectId = ProjectId.make("runtime-layer-binding-project");
+      const create = (threadId: ThreadId, sideChat?: true) =>
+        orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`create-${threadId}-${sideChat === true}`),
+          threadId,
+          projectId,
+          title: "Binding",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          ...(sideChat === undefined
+            ? {}
+            : { sideChat, parentThreadId: ThreadId.make("binding-parent") }),
+        });
+      const bind = (threadId: ThreadId) =>
+        scheduledTasks.upsert({
+          title: "Bound",
+          prompt: "Report status.",
+          enabled: false,
+          schedule: { type: "interval", everyMs: 60_000 },
+          projectId,
+          threadId,
+          workspaceStrategy: { type: "root" },
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        });
+      yield* create(ThreadId.make("binding-parent"));
+
+      // Binding first: an id that does not exist yet is refused, so the side
+      // question that later takes it has nothing pointing at it to list or run.
+      const unborn = ThreadId.make("binding-unborn");
+      const early = yield* Effect.flip(bind(unborn));
+      assert.equal(early.message, "The schedule task's thread was not found.");
+      yield* create(unborn, true);
+      const late = yield* Effect.flip(bind(unborn));
+      assert.equal(late.message, "A schedule task cannot run in a side question.");
+      assert.deepEqual((yield* scheduledTasks.list()).tasks, []);
+
+      // Thread first: a bound thread can never become a side question.
+      const live = ThreadId.make("binding-live");
+      yield* create(live);
+      const { task } = yield* bind(live);
+      const reused = yield* Effect.exit(create(live, true));
+      assert.equal(reused._tag, "Failure");
+      const bound = yield* orchestrator.getThreadShell(task.threadId!);
+      assert.notEqual(bound?.sideChat, true);
+    }),
+  );
+});

@@ -16,7 +16,11 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { resolveInteractionMode, resolveRuntimeMode } from "./OrchestratorMcpService.ts";
+import {
+  isHiddenSideQuestion,
+  resolveInteractionMode,
+  resolveRuntimeMode,
+} from "./OrchestratorMcpService.ts";
 import {
   assertFullAccess,
   assertLiveCaller,
@@ -153,9 +157,14 @@ export const writesThreads = <P, A, E, R>(
         const target = yield* caller.threads
           .getThreadShell(threadId)
           .pipe(Effect.mapError(unavailable));
-        if (target !== null && target.deletedAt === null) {
-          yield* assertTargetWithinLimits(caller.limits, target);
+        if (target === null || target.deletedAt !== null) continue;
+        if (isHiddenSideQuestion(target, caller.scope.thread?.threadId)) {
+          return yield* new OrchestratorMcpFailure({
+            code: "thread_not_found",
+            message: "The thread was not found.",
+          });
         }
+        yield* assertTargetWithinLimits(caller.limits, target);
       }
       // The target's user can raise its modes after the check above; the
       // orchestrator checks again under the thread's lock and records its

@@ -356,7 +356,7 @@ launching again. `create_threads` remains the batch option for a shared checkout
 Lists durable thread shells in one project, newest first: `projectId` when
 given, else the calling thread's project. Callers can filter by title, run
 status, and whether app-owned sub-agent threads are included. Results are
-bounded and offset-paginated. Deleted threads are never listed.
+bounded and offset-paginated. Deleted threads and side questions are never listed.
 
 ### `t3_thread_read`
 
@@ -480,8 +480,10 @@ results use the latest assistant content from the final work turn.
   mode. It may not escalate privileges.
 - A child interaction mode may stay equal to or narrow from `default` to
   `plan`. It may not escalate from `plan` to `default`.
-- Thread tools take any thread in the environment as a target. For a thread
-  caller, list and search cover one project: its own unless `projectId` is given.
+- Thread tools take any thread in the environment as a target, except a `/btw`
+  side question, which is `thread_not_found` to every agent but its own until
+  the user forks it from its card. For a thread caller, list and search cover one
+  project: its own unless `projectId` is given.
 - A tool that changes another thread needs the calling thread's live run, and
   the target's runtime and interaction modes may not be broader than the
   caller's. This is the same privilege ceiling as child creation.

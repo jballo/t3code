@@ -625,6 +625,18 @@ describe("orchestration V2 contracts", () => {
     expect(event.payload.id).toBe(RunId.make("run-1"));
   });
 
+  it("lets a metadata update promote a side chat but never make one", () => {
+    const update = (sideChat: boolean) => ({
+      type: "thread.metadata.update",
+      commandId: "command-side-chat",
+      threadId: "thread-1",
+      sideChat,
+    });
+
+    expect(decodeOrchestrationV2Command(update(false))).toMatchObject({ sideChat: false });
+    expect(() => decodeOrchestrationV2Command(update(true))).toThrow();
+  });
+
   it("decodes app-owned delegated task commands", () => {
     const command = decodeOrchestrationV2Command({
       type: "delegated_task.request",

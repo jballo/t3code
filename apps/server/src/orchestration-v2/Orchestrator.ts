@@ -2235,6 +2235,24 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Parent thread ${parentThread.id} is deleted or belongs to another project.`,
       });
     }
+    // thread.create overwrites an existing id, and a side chat is hidden, so
+    // reusing one would hide that thread's work and anything bound to it, such
+    // as a scheduled task. A side chat is only ever a new thread.
+    if (command.sideChat === true) {
+      const existing = yield* projectionStore.getThread(command.threadId).pipe(
+        Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+      if (existing !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} already exists and cannot become a side chat.`,
+        });
+      }
+    }
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);

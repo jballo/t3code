@@ -2691,8 +2691,12 @@ export const OrchestrationV2Command = Schema.Union([
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
     /** Link (object) or unlink (null) a pull request (#8160); absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
-    /** Promote (false) a side chat to an ordinary thread, or mark one; absent leaves it unchanged. */
-    sideChat: Schema.optional(Schema.Boolean),
+    /**
+     * Promote a side chat to an ordinary thread; absent leaves it unchanged.
+     * Only `thread.create` makes a side chat, so a thread that already has
+     * work, or a scheduled task bound to it, never turns hidden.
+     */
+    sideChat: Schema.optional(Schema.Literal(false)),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.link"),

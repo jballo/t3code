@@ -954,6 +954,29 @@ export const layer = Layer.effect(
         // keep their run history, and so real load failures propagate instead
         // of silently resetting an existing row.
         const existingTask = yield* findTask(id);
+        // A side question is hidden and read-only, so runs sent into one would
+        // be invisible work. A new binding must name a live thread that is not
+        // one: the orchestrator never turns an id that ever existed into a side
+        // question, so no trigger (timer, run-now, webhook) can reach one later.
+        // An unchanged binding is not re-checked, so a task whose thread was
+        // deleted can still be edited.
+        if (input.threadId != null && input.threadId !== existingTask?.threadId) {
+          const bound = yield* threadManagement
+            .getThreadShell(input.threadId)
+            .pipe(
+              Effect.mapError((cause) =>
+                taskError("Could not read the schedule task's thread.", { taskId: id, cause }),
+              ),
+            );
+          if (bound === null || bound.deletedAt !== null || bound.sideChat === true) {
+            return yield* taskError(
+              bound?.sideChat === true
+                ? "A schedule task cannot run in a side question."
+                : "The schedule task's thread was not found.",
+              { taskId: id },
+            );
+          }
+        }
         // Keep the existing next_run_at when the schedule itself is untouched:
         // editing a title or prompt must not postpone (or resurrect) a due
         // run — only schedule/enabled changes restart the clock.

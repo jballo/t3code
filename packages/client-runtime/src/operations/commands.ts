@@ -130,8 +130,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly expectedEmpty?: boolean;
-  /** `false` promotes a side chat to an ordinary thread. */
-  readonly sideChat?: boolean;
+  /** Promotes a side chat to an ordinary thread. */
+  readonly sideChat?: false;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {

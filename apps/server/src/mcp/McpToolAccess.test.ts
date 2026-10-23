@@ -28,6 +28,7 @@ const oldProviderThreadId = ThreadId.make("thread:old-provider-background");
 const archivedThreadId = ThreadId.make("thread:archived-background");
 const unknownOwnerThreadId = ThreadId.make("thread:unknown-background-owner");
 const sideQuestionThreadId = ThreadId.make("thread:side-question");
+const promotedThreadId = ThreadId.make("thread:promoted-side-question");
 
 const backgroundShell = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) => ({
   ...liveThreadShell(threadId, { activeRunId: null }),
@@ -45,6 +46,7 @@ const shells = new Map([
   [fullAccessThreadId, liveThreadShell(fullAccessThreadId)],
   // A side question keeps its full-access parent's modes.
   [sideQuestionThreadId, { ...liveThreadShell(sideQuestionThreadId), sideChat: true }],
+  [promotedThreadId, { ...liveThreadShell(promotedThreadId), sideChat: false }],
   [endedThreadId, liveThreadShell(endedThreadId, { activeRunId: null })],
   [backgroundThreadId, backgroundShell(backgroundThreadId, ProviderInstanceId.make("codex"))],
   [oldProviderThreadId, backgroundShell(oldProviderThreadId, ProviderInstanceId.make("claude"))],
@@ -311,6 +313,9 @@ it.effect.each([
   ["writes_threads", sideQuestion, { threadId: supervisedThreadId }, "capability_denied"],
   ["starts_threads", sideQuestion, {}, "capability_denied"],
   ["writes_environment", sideQuestion, {}, "capability_denied"],
+  ["writes_threads", fullAccess, { threadId: sideQuestionThreadId }, "thread_not_found"],
+  ["writes_threads", fullAccessClient, { threadId: sideQuestionThreadId }, "thread_not_found"],
+  ["writes_threads", fullAccess, { threadId: promotedThreadId }, "ran"],
 ] as const)("%s from %o with %o: %s", ([tool, scope, args, expected]) =>
   call(tool, scope, args).pipe(
     Effect.map((outcome) => expect(outcome).toBe(expected)),

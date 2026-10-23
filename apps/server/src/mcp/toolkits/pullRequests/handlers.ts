@@ -30,6 +30,7 @@ import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequest
 import { pullRequestSyncKey } from "../../../pullRequest/pullRequestSyncKey.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
+import { isHiddenSideQuestion } from "../../OrchestratorMcpService.ts";
 import {
   type ListThreadPullRequestsResult,
   PullRequestLinkFailedError,
@@ -213,7 +214,11 @@ const make = Effect.gen(function* () {
       .getThreadShell(threadId)
       .pipe(Effect.map(Option.fromNullishOr))
       .pipe(Effect.mapError((cause) => new Failure({ cause })));
-    if (Option.isNone(thread) || thread.value.deletedAt !== null) {
+    if (
+      Option.isNone(thread) ||
+      thread.value.deletedAt !== null ||
+      isHiddenSideQuestion(thread.value, scope.thread?.threadId)
+    ) {
       return yield* new PullRequestThreadNotFoundError({ threadId });
     }
     return thread.value;

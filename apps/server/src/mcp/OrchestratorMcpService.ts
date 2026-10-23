@@ -202,6 +202,16 @@ function failure(code: OrchestratorMcpFailure["code"], message: string): Orchest
 }
 
 /**
+ * A side question is the user's aside, shown only in its parent's card and
+ * deleted with it, so to every agent but its own it does not exist. Promoting
+ * one clears the flag and makes it an ordinary thread again.
+ */
+export const isHiddenSideQuestion = (
+  shell: Pick<OrchestrationV2ThreadShell, "id" | "sideChat">,
+  callerThreadId: ThreadId | undefined,
+) => shell.sideChat === true && shell.id !== callerThreadId;
+
+/**
  * A caller's thread is live while it is not archived, runs on the caller's
  * provider instance, and has an active run or a background subagent that
  * instance started. A background subagent outlives its run and calls tools
@@ -1037,12 +1047,16 @@ const make = Effect.gen(function* () {
             ),
           );
 
-  const loadTargetThread = (threadId: ThreadId) =>
+  const loadTargetThread = (scope: McpInvocationScope, threadId: ThreadId) =>
     Effect.gen(function* () {
       const shell = yield* threadManagement
         .getThreadShell(threadId)
         .pipe(Effect.mapError(threadManagementFailure));
-      if (shell === null || shell.deletedAt !== null) {
+      if (
+        shell === null ||
+        shell.deletedAt !== null ||
+        isHiddenSideQuestion(shell, scope.thread?.threadId)
+      ) {
         return yield* failure("thread_not_found", `Thread ${threadId} was not found.`);
       }
       return yield* loadProjectThread(shell.projectId, threadId);
@@ -1054,7 +1068,7 @@ const make = Effect.gen(function* () {
       const target =
         caller.parent !== undefined && threadId === caller.parent.thread.id
           ? caller.parent
-          : yield* loadTargetThread(threadId);
+          : yield* loadTargetThread(scope, threadId);
       return { ...caller, target } as const;
     });
 
@@ -1113,7 +1127,11 @@ const make = Effect.gen(function* () {
       const shell = yield* threadManagement
         .getThreadShell(threadId)
         .pipe(Effect.mapError(threadManagementFailure));
-      if (shell === null || shell.deletedAt !== null) {
+      if (
+        shell === null ||
+        shell.deletedAt !== null ||
+        isHiddenSideQuestion(shell, scope.thread?.threadId)
+      ) {
         return yield* failure("thread_not_found", `Thread ${threadId} is no longer available.`);
       }
       const target = yield* threadManagement

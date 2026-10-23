@@ -9,7 +9,6 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   CircleStopIcon,
-  LoaderCircleIcon,
   LockIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -18,6 +17,7 @@ import { useState } from "react";
 import { cn } from "~/lib/utils";
 import ChatMarkdown from "../ChatMarkdown";
 import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
 import { ComposerBanner } from "./ComposerBanner";
 import { Tooltip, TooltipPopup, TooltipScrollDismissArea, TooltipTrigger } from "../ui/tooltip";
 import { useThreadProjection } from "../../state/entities";
@@ -125,7 +125,7 @@ export function SideQuestionCard(props: {
         >
           <ComposerBanner.Icon className="h-(--composer-banner-icon-column)">
             {activity === "thinking" ? (
-              <LoaderCircleIcon className="animate-spin" />
+              <Spinner aria-hidden />
             ) : activity === "answered" ? (
               <CheckCircle2Icon className="text-success" />
             ) : activity === "interrupted" ? (

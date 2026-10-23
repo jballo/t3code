@@ -2429,6 +2429,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.driver": command.modelSelection.instanceId,
     });
 
+    // Lists, the delete cascade and the startup sweep all reach a side chat
+    // through its parent; without one it could never be seen or removed.
+    if (command.sideChat === true && command.parentThreadId === undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "A side chat needs a parent thread.",
+      });
+    }
+
     // A linked thread records its parent but transfers no context, so the
     // relationship stays null instead of claiming a fork.
     const parentThread =

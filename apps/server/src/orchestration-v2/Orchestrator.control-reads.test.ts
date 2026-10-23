@@ -824,6 +824,20 @@ it.effect("links a side chat under its parent without claiming a fork, and promo
     );
     // An unknown parent is a rejected command, not a projection failure.
     assert.equal(missingParent._tag, "OrchestratorDispatchError");
+
+    const parentlessId = ThreadId.make("thread:side-chat-parentless");
+    const parentless = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-parentless"),
+        threadId: parentlessId,
+        title: "Parentless",
+        sideChat: true,
+        ...base,
+      }),
+    );
+    assert.equal(parentless._tag, "OrchestratorDispatchError");
+    assert.isNull(yield* projections.getThreadShell(parentlessId));
   }).pipe(Effect.provide(layerTest)),
 );
 

@@ -33,6 +33,7 @@ import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as SideQuestionReactor from "./SideQuestionReactor.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
@@ -739,6 +740,443 @@ it.effect("keeps delegated child pull-request links independent of the parent", 
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("links a side chat under its parent without claiming a fork, and promotes it", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const projectId = ProjectId.make("project:side-chat");
+    const parentId = ThreadId.make("thread:side-chat-parent");
+    const sideChatId = ThreadId.make("thread:side-chat-child");
+    const base = {
+      projectId,
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-child"),
+      threadId: sideChatId,
+      title: "Side chat",
+      parentThreadId: parentId,
+      sideChat: true,
+      ...base,
+    });
+
+    const child = yield* projections.getThread(sideChatId);
+    assert.deepEqual(child.lineage, {
+      parentThreadId: parentId,
+      relationshipToParent: null,
+      rootThreadId: parentId,
+    });
+    assert.isNull(child.forkedFrom);
+    assert.equal(child.sideChat, true);
+    assert.equal((yield* projections.getThreadShell(sideChatId))?.sideChat, true);
+    assert.isUndefined((yield* projections.getThread(parentId)).sideChat);
+    assert.deepEqual(yield* projections.getSideQuestionChildThreadIds(parentId), [sideChatId]);
+
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("promote-side-chat"),
+      threadId: sideChatId,
+      sideChat: false,
+    });
+    assert.equal((yield* projections.getThread(sideChatId)).sideChat, false);
+    assert.equal((yield* projections.getThreadShell(sideChatId))?.sideChat, false);
+    // Promotion detaches it from the parent's disposable set.
+    assert.deepEqual(yield* projections.getSideQuestionChildThreadIds(parentId), []);
+
+    const crossProject = yield* Effect.exit(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-cross-project"),
+        threadId: ThreadId.make("thread:side-chat-cross-project"),
+        title: "Elsewhere",
+        parentThreadId: parentId,
+        sideChat: true,
+        ...base,
+        projectId: ProjectId.make("project:side-chat-other"),
+      }),
+    );
+    assert.equal(crossProject._tag, "Failure");
+
+    const missingParent = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-missing-parent"),
+        threadId: ThreadId.make("thread:side-chat-orphan"),
+        title: "Orphan",
+        parentThreadId: ThreadId.make("thread:side-chat-no-such-parent"),
+        sideChat: true,
+        ...base,
+      }),
+    );
+    // An unknown parent is a rejected command, not a projection failure.
+    assert.equal(missingParent._tag, "OrchestratorDispatchError");
+
+    const parentlessId = ThreadId.make("thread:side-chat-parentless");
+    const parentless = yield* Effect.flip(
+      orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create-side-chat-parentless"),
+        threadId: parentlessId,
+        title: "Parentless",
+        sideChat: true,
+        ...base,
+      }),
+    );
+    assert.equal(parentless._tag, "OrchestratorDispatchError");
+    assert.isNull(yield* projections.getThreadShell(parentlessId));
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("promoting a side chat restarts sessions that cannot change mode in place", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const parentId = ThreadId.make("thread:side-chat-restart-parent");
+    const sideChatId = ThreadId.make("thread:side-chat-restart-child");
+    const base = {
+      projectId: ProjectId.make("project:side-chat-restart"),
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-restart-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-side-chat-restart-child"),
+      threadId: sideChatId,
+      title: "Side chat",
+      parentThreadId: parentId,
+      sideChat: true,
+      ...base,
+    });
+    const attach = (id: string, supportsRuntimeModeSwitchInSession: boolean) =>
+      projections.apply({
+        id: EventId.make(`attach-${id}`),
+        type: "provider-session.attached",
+        threadId: sideChatId,
+        occurredAt: now,
+        payload: {
+          id: ProviderSessionId.make(id),
+          driver: adapter.driver,
+          providerInstanceId: instanceId,
+          status: "ready",
+          cwd: "/repo",
+          model: modelSelection.model,
+          capabilities: {
+            ...CodexProviderCapabilitiesV2,
+            sessions: {
+              ...CodexProviderCapabilitiesV2.sessions,
+              supportsRuntimeModeSwitchInSession,
+            },
+          },
+          createdAt: now,
+          updatedAt: now,
+          lastError: null,
+        },
+      });
+    yield* attach("session:switches-mode", true);
+    yield* attach("session:fixed-mode", false);
+
+    const detachedBy = (commandId: CommandId) =>
+      eventSink.readByCommandId({ commandId }).pipe(
+        Stream.runCollect,
+        Effect.map((stored) =>
+          [...stored].flatMap(({ event }) =>
+            event.type === "provider-session.detached" ? [event.payload.providerSessionId] : [],
+          ),
+        ),
+      );
+
+    const renameId = CommandId.make("rename-side-chat-restart");
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: renameId,
+      threadId: sideChatId,
+      title: "Renamed",
+    });
+    assert.deepEqual(yield* detachedBy(renameId), []);
+
+    // Its turns ran read-only, so after promotion its stored mode applies for
+    // the first time, the same change a runtime mode switch makes.
+    const promoteId = CommandId.make("promote-side-chat-restart");
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: promoteId,
+      threadId: sideChatId,
+      sideChat: false,
+    });
+    assert.deepEqual(yield* detachedBy(promoteId), [ProviderSessionId.make("session:fixed-mode")]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("deleting a thread deletes its side questions but keeps a promoted one", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* SideQuestionReactor.SideQuestionReactor;
+    const projectId = ProjectId.make("project:side-question-cascade");
+    const parentId = ThreadId.make("thread:side-question-cascade-parent");
+    const attachedId = ThreadId.make("thread:side-question-cascade-attached");
+    const promotedId = ThreadId.make("thread:side-question-cascade-promoted");
+    const base = {
+      projectId,
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("cascade-create-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    for (const [commandId, threadId] of [
+      ["cascade-create-attached", attachedId],
+      ["cascade-create-promoted", promotedId],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(commandId),
+        threadId,
+        title: "Side question",
+        parentThreadId: parentId,
+        sideChat: true,
+        ...base,
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("cascade-promote"),
+      threadId: promotedId,
+      sideChat: false,
+    });
+
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("cascade-delete-parent"),
+      threadId: parentId,
+    });
+    const parent = yield* projections.getThread(parentId);
+    assert.isNotNull(parent.deletedAt);
+    yield* reactor.handle({
+      id: EventId.make("event:cascade-parent-deleted"),
+      type: "thread.deleted",
+      threadId: parentId,
+      occurredAt: yield* DateTime.now,
+      payload: parent,
+    });
+
+    assert.isNotNull((yield* projections.getThread(attachedId)).deletedAt);
+    assert.isNull((yield* projections.getThread(promotedId)).deletedAt);
+  }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
+);
+
+it.effect("deletes the side questions of a thread deleted while nothing reacted", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* SideQuestionReactor.SideQuestionReactor;
+    const parentId = ThreadId.make("thread:side-question-missed-parent");
+    const attachedId = ThreadId.make("thread:side-question-missed-attached");
+    const promotedId = ThreadId.make("thread:side-question-missed-promoted");
+    const base = {
+      projectId: ProjectId.make("project:side-question-missed"),
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("missed-create-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    for (const [commandId, threadId] of [
+      ["missed-create-attached", attachedId],
+      ["missed-create-promoted", promotedId],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(commandId),
+        threadId,
+        title: "Side question",
+        parentThreadId: parentId,
+        sideChat: true,
+        ...base,
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("missed-promote"),
+      threadId: promotedId,
+      sideChat: false,
+    });
+
+    // The server stopped before the reactor saw this delete.
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("missed-delete-parent"),
+      threadId: parentId,
+    });
+    assert.isNull((yield* projections.getThread(attachedId)).deletedAt);
+
+    yield* reactor.reconcile();
+
+    assert.isNotNull((yield* projections.getThread(attachedId)).deletedAt);
+    assert.isNull((yield* projections.getThread(promotedId)).deletedAt);
+  }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
+);
+
+it.effect("releases a side question's live approval and question without an answer", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* SideQuestionReactor.SideQuestionReactor;
+    const parentId = ThreadId.make("thread:side-question-live-parent");
+    const sideId = ThreadId.make("thread:side-question-live");
+    const sessionId = ProviderSessionId.make("session:side-question-live");
+    const now = yield* DateTime.now;
+    const base = {
+      projectId: ProjectId.make("project:side-question-live"),
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("live-create-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("live-create-side"),
+      threadId: sideId,
+      title: "Side question",
+      parentThreadId: parentId,
+      sideChat: true,
+      ...base,
+    });
+    yield* projections.apply({
+      id: EventId.make("live-attach"),
+      type: "provider-session.attached",
+      threadId: sideId,
+      occurredAt: now,
+      payload: {
+        id: sessionId,
+        driver: adapter.driver,
+        providerInstanceId: instanceId,
+        status: "ready",
+        cwd: "/repo",
+        model: modelSelection.model,
+        capabilities: CodexProviderCapabilitiesV2,
+        createdAt: now,
+        updatedAt: now,
+        lastError: null,
+      },
+    });
+    const ask = Effect.fn("controlReadsTest.askSideQuestion")(function* (
+      kind: "user_input" | "command",
+    ) {
+      const requestId = RuntimeRequestId.make(`request:side-question-live:${kind}`);
+      const nodeId = NodeId.make(`node:side-question-live:${kind}`);
+      yield* projections.apply({
+        id: EventId.make(`node:side-question-live:${kind}`),
+        type: "node.updated",
+        threadId: sideId,
+        occurredAt: now,
+        payload: {
+          id: nodeId,
+          threadId: sideId,
+          runId: null,
+          parentNodeId: null,
+          rootNodeId: nodeId,
+          kind: kind === "user_input" ? "user_input_request" : "approval_request",
+          status: "waiting",
+          countsForRun: false,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          runtimeRequestId: requestId,
+          checkpointScopeId: null,
+          startedAt: now,
+          completedAt: null,
+        },
+      });
+      const event = {
+        id: EventId.make(`request:side-question-live:${kind}`),
+        type: "runtime-request.updated",
+        threadId: sideId,
+        occurredAt: now,
+        payload: {
+          id: requestId,
+          nodeId,
+          providerTurnId: null,
+          nativeRequestRef: null,
+          kind,
+          status: "pending",
+          responseCapability: { type: "live", providerSessionId: sessionId },
+          createdAt: now,
+          resolvedAt: null,
+        },
+      } satisfies OrchestrationV2DomainEvent;
+      yield* projections.apply(event);
+      yield* reactor.handle(event);
+      return { requestId, nodeId };
+    });
+
+    for (const kind of ["user_input", "command"] as const) {
+      const { requestId, nodeId } = yield* ask(kind);
+      const response = yield* projections.getRuntimeResponseContext(sideId, requestId);
+      assert.equal(response.request?.status, "resolved", kind);
+      assert.equal(response.request?.decision, "decline", kind);
+      assert.equal(response.node?.id, nodeId);
+      assert.equal(response.node?.status, "cancelled", kind);
+    }
+  }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
+);
+
 it.effect("wakes the parent once when its delegated task asks a question", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1229,5 +1667,59 @@ it.effect("explicit settle clears snooze atomically and stays idempotent after r
     } as const;
     assert.deepInclude(yield* projections.getThreadShell(threadId), active);
     assert.deepInclude((yield* projections.getThreadProjection(threadId)).thread, active);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("a side chat is only ever a new thread, never an existing or deleted one", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const base = {
+      projectId: ProjectId.make("project:side-chat-reuse"),
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    const parentId = ThreadId.make("thread:side-chat-reuse-parent");
+    const liveId = ThreadId.make("thread:side-chat-reuse-live");
+    const deletedId = ThreadId.make("thread:side-chat-reuse-deleted");
+    for (const [threadId, title] of [
+      [parentId, "Parent"],
+      [liveId, "Live"],
+      [deletedId, "Deleted"],
+    ] as const) {
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create-${threadId}`),
+        threadId,
+        title,
+        ...base,
+      });
+    }
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("delete-side-chat-reuse"),
+      threadId: deletedId,
+    });
+
+    for (const threadId of [liveId, deletedId]) {
+      const reused = yield* Effect.exit(
+        orchestrator.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`reuse-${threadId}`),
+          threadId,
+          title: "Side chat",
+          parentThreadId: parentId,
+          sideChat: true,
+          ...base,
+        }),
+      );
+      assert.equal(reused._tag, "Failure");
+      assert.notEqual((yield* projections.getThread(threadId)).sideChat, true);
+    }
   }).pipe(Effect.provide(layerTest)),
 );

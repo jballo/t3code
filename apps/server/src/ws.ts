@@ -57,6 +57,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   ORCHESTRATION_PROTOCOL_QUERY_PARAM,
   ORCHESTRATION_PROTOCOL_VERSION,
+  OrchestrationAskSideQuestionError,
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
@@ -159,6 +160,7 @@ import {
 } from "./orchestration-v2/WireProjection.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
+import * as SideQuestionService from "./orchestration-v2/SideQuestionService.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
@@ -978,7 +980,9 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
   function* (input: {
     readonly afterSequence?: number;
     readonly requestCompletionMarker?: boolean;
+    readonly acceptSideChats?: boolean;
   }) {
+    const acceptSideChats = input.acceptSideChats === true;
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
@@ -1006,14 +1010,15 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       },
     );
     const loadSnapshot = Effect.fn("ws.orchestrationV2.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
+      const base = buildActiveShellSnapshot({
+        ...(yield* loadShellSnapshotParts({
           sql,
           readThreads: threadManagement.readShellSnapshot({ location: "active" }),
           listProjects: projects.listShells(),
           latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
+        })),
+        acceptSideChats,
+      });
       subagentThreadIds = new Set(
         base.threads
           .filter((thread) => thread.lineage.relationshipToParent === "subagent")
@@ -1053,7 +1058,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const projectShellItems = Effect.fn("ws.orchestrationV2.projectShellItems")(function* (
       events: ReadonlyArray<ShellApplicationEvent>,
     ) {
-      return yield* Effect.forEach(
+      const items = yield* Effect.forEach(
         coalesceShellApplicationEvents(events),
         (stored) =>
           Effect.gen(function* () {
@@ -1061,10 +1066,12 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
               return yield* projectItem(stored);
             }
             const shell = yield* threadManagement.getThreadShell(stored.event.threadId);
+            if (!acceptSideChats && shell?.sideChat === true) return null;
             return shellStreamItemFromThreadShell({ stored, shell });
           }),
         { concurrency: 8 },
       );
+      return items.filter((item) => item !== null);
     });
 
     const toShellStream = <E, R>(stream: Stream.Stream<ShellApplicationEvent, E, R>) =>
@@ -1245,6 +1252,7 @@ export const layerWsRpc = (
       const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
       const eventLoopMonitor = yield* EventLoopMonitor.EventLoopMonitor;
       const threadSearch = yield* ThreadSearch.ThreadSearch;
+      const sideQuestions = yield* SideQuestionService.SideQuestionService;
 
       const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
@@ -1958,6 +1966,26 @@ export const layerWsRpc = (
                   message: "Failed to search threads",
                   cause,
                 }),
+            ),
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.askSideQuestion]: (input) =>
+          Effect.annotateCurrentSpan({
+            "orchestration_v2.thread_id": input.threadId,
+            "orchestration_v2.parent_thread_id": input.parentThreadId,
+          }).pipe(
+            Effect.andThen(
+              sideQuestions.ask({
+                parentThreadId: input.parentThreadId,
+                question: input.question,
+                threadId: input.threadId,
+                messageId: input.messageId,
+                commandId: input.commandId,
+                createdBy: "user",
+                creationSource: input.creationSource ?? "web",
+              }),
+            ),
+            Effect.mapError(
+              (cause) => new OrchestrationAskSideQuestionError({ message: cause.message, cause }),
             ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: (_input) =>

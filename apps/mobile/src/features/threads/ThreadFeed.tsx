@@ -328,6 +328,7 @@ export interface ThreadFeedProps {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly threadTitle: string;
+  readonly canForkResponses: boolean;
   readonly workspaceRoot?: string | null;
   readonly feed: ReadonlyArray<ThreadFeedEntry>;
   readonly pendingHandoff?: HandoffEndpoints | null;
@@ -1203,6 +1204,7 @@ function renderFeedEntry(
     readonly markdownContentWidth: number;
     readonly contentWidth: number;
     readonly threadTitle: string;
+    readonly canForkResponses: boolean;
     readonly workflowOpening: WorkflowOpening | null;
   },
 ) {
@@ -1686,7 +1688,7 @@ function renderFeedEntry(
               buttonSize={28}
               iconSize={13}
             />
-            {message.projectedItem ? (
+            {message.projectedItem && props.canForkResponses ? (
               <AssistantForkButton
                 environmentId={props.environmentId}
                 iconColor={iconSubtleColor}
@@ -2934,6 +2936,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             markdownContentWidth,
             contentWidth,
             threadTitle: props.threadTitle,
+            canForkResponses: props.canForkResponses,
             skills: props.skills,
             workspaceRoot: props.workspaceRoot,
             workflowOpening,

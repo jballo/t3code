@@ -1370,6 +1370,8 @@ export const ThreadDetailScreen = function ThreadDetailScreen(props: ThreadDetai
               contentPresentation={props.contentPresentation}
               agentLabel={agentLabel}
               threadTitle={props.selectedThread.title}
+              // The server refuses it: a fork would name the hidden side question.
+              canForkResponses={props.selectedThread.sideChat !== true}
               latestRun={props.activityRun}
               activeWorkStartedAt={props.activeWorkStartedAt}
               runlessWorkActive={props.runlessWorkActive ?? false}

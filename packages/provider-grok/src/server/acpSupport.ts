@@ -8,7 +8,9 @@ import {
 import type { GrokSettings } from "../settings.ts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
@@ -34,6 +36,7 @@ interface GrokAcpRuntimeInput extends Omit<
   readonly grokSettings: GrokAcpRuntimeGrokSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
+  readonly readOnly?: boolean;
 }
 
 /**
@@ -47,11 +50,47 @@ export const GROK_SUPPORTED_RUNTIME_MODES = [
   "full-access",
 ] as const satisfies ReadonlyArray<RuntimeMode>;
 
+export function grokAcpSpawnArgs(
+  runtimeMode?: RuntimeMode,
+  readOnlyProfilePath?: string,
+): ReadonlyArray<string> {
+  const args = grokPermissionModeArgs(runtimeMode);
+  if (readOnlyProfilePath === undefined) return args;
+  const agent = args.indexOf("agent");
+  return [
+    ...args.slice(0, agent + 1),
+    "--agent-profile",
+    readOnlyProfilePath,
+    ...args.slice(agent + 1),
+  ];
+}
+
+/**
+ * With Grok 1.0.62, a user's Claude `permissions.defaultMode: "auto"` can
+ * override `--permission-mode default`, so Grok edits and runs commands without
+ * asking, and `--deny` rules don't stop it. A read-only session therefore gets
+ * an agent profile whose only tools read. Grok adds its MCP gateway tools to
+ * any allowlist, so the profile removes them by name.
+ */
+const GROK_READ_ONLY_AGENT_PROFILE = `---
+name: t3-read-only
+description: Answers questions about the workspace without changing it.
+tools:
+  - read_file
+  - list_dir
+  - grep
+disallowedTools:
+  - search_tool
+  - use_tool
+---
+Answer the user's question about this workspace. You can read, list and search its files.
+`;
+
 /**
  * `--permission-mode` on the argv beats the user's Grok config, so Supervised
  * cannot inherit a configured always-approve.
  */
-export function grokAcpSpawnArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string> {
+function grokPermissionModeArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string> {
   switch (runtimeMode) {
     case undefined:
       return ["agent", "stdio"];
@@ -69,10 +108,11 @@ function buildGrokAcpSpawnInput(
   cwd: string,
   environment?: NodeJS.ProcessEnv,
   runtimeMode?: RuntimeMode,
+  readOnlyProfilePath?: string,
 ): AcpSessionRuntime.AcpSpawnInput {
   return {
     command: grokSettings?.binaryPath || "grok",
-    args: [...grokAcpSpawnArgs(runtimeMode)],
+    args: [...grokAcpSpawnArgs(runtimeMode, readOnlyProfilePath)],
     cwd,
     env: {
       ...environment,
@@ -145,6 +185,15 @@ export function grokApprovalOptions(
   ];
 }
 
+const writeReadOnlyAgentProfile = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-grok-read-only-" });
+  const profilePath = path.join(directory, "t3-read-only.md");
+  yield* fs.writeFileString(profilePath, GROK_READ_ONLY_AGENT_PROFILE);
+  return profilePath;
+});
+
 export const makeGrokAcpRuntime = Effect.fn("GrokAcpSupport.makeGrokAcpRuntime")(function* (
   input: GrokAcpRuntimeInput,
 ): Effect.fn.Return<
@@ -153,6 +202,12 @@ export const makeGrokAcpRuntime = Effect.fn("GrokAcpSupport.makeGrokAcpRuntime")
   ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
 > {
   const processGroupPlatform = yield* HostProcess.Platform.pipe(Effect.provide(NodeServices.layer));
+  const readOnlyProfilePath = input.readOnly
+    ? yield* writeReadOnlyAgentProfile.pipe(
+        Effect.provide(NodeServices.layer),
+        Effect.mapError((cause) => new EffectAcpErrors.AcpSpawnError({ command: "grok", cause })),
+      )
+    : undefined;
   const acpContext = yield* Layer.build(
     AcpSessionRuntime.layer({
       ...input,
@@ -161,6 +216,7 @@ export const makeGrokAcpRuntime = Effect.fn("GrokAcpSupport.makeGrokAcpRuntime")
         input.cwd,
         input.environment,
         input.runtimeMode,
+        readOnlyProfilePath,
       ),
       authMethodId: resolveGrokAuthMethodId(input.environment),
       cancelMeta: { ...input.cancelMeta, ...GROK_ACP_CANCEL_META },

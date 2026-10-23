@@ -2429,6 +2429,42 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.driver": command.modelSelection.instanceId,
     });
 
+    // Lists, the delete cascade and the startup sweep all reach a side chat
+    // through its parent; without one it could never be seen or removed.
+    if (command.sideChat === true && command.parentThreadId === undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "A side chat needs a parent thread.",
+      });
+    }
+
+    // A linked thread records its parent but transfers no context, so the
+    // relationship stays null instead of claiming a fork.
+    const parentThread =
+      command.parentThreadId === undefined
+        ? null
+        : yield* projectionStore.getThread(command.parentThreadId).pipe(
+            Effect.mapError((cause) =>
+              cause._tag === "ProjectionStoreThreadNotFoundError"
+                ? new OrchestratorDispatchError({
+                    commandId: command.commandId,
+                    commandType: command.type,
+                    cause: `Parent thread ${command.parentThreadId} does not exist.`,
+                  })
+                : new OrchestratorProjectionError({ threadId: command.parentThreadId!, cause }),
+            ),
+          );
+    if (
+      parentThread !== null &&
+      (parentThread.deletedAt !== null || parentThread.projectId !== command.projectId)
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Parent thread ${parentThread.id} is deleted or belongs to another project.`,
+      });
+    }
     // Tombstones reserve their ids too; recreating one would overwrite its history.
     const existing = yield* projectionStore.getThread(command.threadId).pipe(
       Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
@@ -2458,11 +2494,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,
+      ...(command.sideChat === undefined ? {} : { sideChat: command.sideChat }),
       pullRequests: [],
       lineage: {
-        parentThreadId: null,
+        parentThreadId: parentThread?.id ?? null,
         relationshipToParent: null,
-        rootThreadId: command.threadId,
+        rootThreadId: parentThread?.lineage.rootThreadId ?? command.threadId,
       },
       forkedFrom: null,
       createdAt: now,
@@ -2915,7 +2952,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
     }
 
+    // A side question runs read-only whatever its stored mode, so promoting it
+    // changes the policy its provider session was opened with, like a mode change.
+    const promotesSideQuestion =
+      command.type === "thread.metadata.update" &&
+      command.sideChat === false &&
+      thread.sideChat === true;
     const needsProviderState =
+      promotesSideQuestion ||
       command.type === "thread.runtime-mode.set" ||
       command.type === "thread.model-selection.set" ||
       command.type === "provider.switch" ||
@@ -3188,6 +3232,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             ...(command.title === undefined ? {} : { title: command.title }),
+            ...(command.sideChat === undefined ? {} : { sideChat: command.sideChat }),
             ...(command.limitRecovery === undefined ? {} : { limitRecovery }),
             ...(command.limitRecovery !== undefined &&
             limitRecovery?.snooze === true &&
@@ -3679,7 +3724,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             command.worktreePath !== undefined &&
             command.worktreePath !== thread.worktreePath
           ? (providerContext?.providerSessions ?? []).map((session) => session.id)
-          : command.type === "thread.runtime-mode.set"
+          : command.type === "thread.runtime-mode.set" || promotesSideQuestion
             ? (providerContext?.providerSessions ?? [])
                 .filter(
                   (session) => !session.capabilities.sessions.supportsRuntimeModeSwitchInSession,
@@ -3715,10 +3760,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     ? "Thread archived."
                     : command.type === "thread.settle"
                       ? "Thread settled."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
+                      : command.type === "thread.runtime-mode.set" || promotesSideQuestion
+                        ? "Runtime mode changed."
+                        : command.type === "thread.metadata.update"
+                          ? "Workspace changed."
                           : "Provider or model selection changed.",
               },
             });
@@ -3734,10 +3779,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     ? "Thread archived."
                     : command.type === "thread.settle"
                       ? "Thread settled."
-                      : command.type === "thread.metadata.update"
-                        ? "Workspace changed."
-                        : command.type === "thread.runtime-mode.set"
-                          ? "Runtime mode changed."
+                      : command.type === "thread.runtime-mode.set" || promotesSideQuestion
+                        ? "Runtime mode changed."
+                        : command.type === "thread.metadata.update"
+                          ? "Workspace changed."
                           : "Provider or model selection changed.",
                 // Terminal detaches revoke the thread's MCP credentials; other
                 // detach reasons keep them so a re-attaching provider process
@@ -3873,6 +3918,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
+    // A fork's lineage, transfer and inherited items all name its source, which
+    // would hand a hidden side question's id to every thread reader.
+    if (sourceProjection.thread.sideChat === true) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Fork a side question from its parent's island to keep it as a thread.",
+      });
+    }
     // The source is not under this command's lock, so check the modes this
     // command copies, not an earlier read the source's user could outrun.
     yield* refuseAboveDispatchModeLimit(command, command.sourceThreadId, sourceProjection.thread);

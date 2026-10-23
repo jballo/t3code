@@ -4907,6 +4907,21 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       });
       assert.deepEqual(followingPage.items, targetAfterRollback.visibleTurnItems.slice(2));
       assert.isFalse(followingPage.hasMore);
+      const tailPage = yield* projectionStore.getTimelinePage(targetThreadId, {
+        view: "activity",
+        limit: 2,
+        fromEnd: true,
+      });
+      assert.deepEqual(tailPage.items, targetAfterRollback.visibleTurnItems.slice(-2));
+      assert.equal(tailPage.totalItems, targetAfterRollback.visibleTurnItems.length);
+      assert.isTrue(tailPage.hasMore);
+      const wholeTail = yield* projectionStore.getTimelinePage(targetThreadId, {
+        view: "activity",
+        limit: 10,
+        fromEnd: true,
+      });
+      assert.deepEqual(wholeTail.items, targetAfterRollback.visibleTurnItems);
+      assert.isFalse(wholeTail.hasMore);
 
       assert.deepEqual(
         targetAfterRollback.visibleTurnItems.map((row) => [

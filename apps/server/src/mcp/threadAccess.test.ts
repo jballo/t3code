@@ -18,14 +18,16 @@ const client: McpInvocationContext.McpInvocationScope = {
   issuedAt: 1,
 };
 
-const readBare = (existing: ReadonlyArray<ThreadId>) =>
+const readBare = (existing: ReadonlyArray<ThreadId>, sideChat = false) =>
   readThread(bareId).pipe(
     Effect.flip,
     Effect.provideService(McpInvocationContext.McpInvocationContext, client),
     Effect.provide(
       Layer.mock(ThreadManagement.ThreadManagementService)({
         getThreadShell: (threadId) =>
-          Effect.succeed(existing.includes(threadId) ? liveThreadShell(threadId) : null),
+          Effect.succeed(
+            existing.includes(threadId) ? { ...liveThreadShell(threadId), sideChat } : null,
+          ),
       }),
     ),
   );
@@ -36,6 +38,15 @@ it.effect("points a bare uuid at the mcp: thread it belongs to", () =>
 
     expect(error.code).toBe("thread_not_found");
     expect(error.message).toBe(`The thread was not found. Did you mean \`mcp:${bareId}\`?`);
+  }),
+);
+
+it.effect("never names a side question, which other agents must not learn exists", () =>
+  Effect.gen(function* () {
+    const error = yield* readBare([ThreadId.make(`mcp:${bareId}`)], true);
+
+    expect(error.code).toBe("thread_not_found");
+    expect(error.message).toBe("The thread was not found.");
   }),
 );
 

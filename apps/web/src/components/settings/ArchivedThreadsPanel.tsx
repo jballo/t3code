@@ -55,10 +55,13 @@ export function ArchivedThreadsPanel() {
       }),
     );
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.threads.map((thread) => ({
-        ...presentThreadShell(environmentId, thread),
-        environmentLabel: environmentLabels.get(environmentId) ?? environmentId,
-      })),
+      // Side questions are never listed on their own, even archived ones.
+      snapshot.threads
+        .filter((thread) => thread.sideChat !== true)
+        .map((thread) => ({
+          ...presentThreadShell(environmentId, thread),
+          environmentLabel: environmentLabels.get(environmentId) ?? environmentId,
+        })),
     );
     const hasMultipleEnvironments =
       new Set(

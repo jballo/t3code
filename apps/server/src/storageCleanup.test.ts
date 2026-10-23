@@ -677,9 +677,18 @@ describe("subagent worktree ownership", () => {
     "recent-settle",
     "child-settled-now",
     "child-settled-only",
+    "side-question",
+    "side-question-grandchild",
+    "side-question-running",
+    "side-question-missing-parent",
   ] as const)("checks the whole owner group (%s)", (scenario) =>
     Effect.gen(function* () {
       yield* TestClock.setTime(NOW_MS);
+      const sideQuestion = [
+        "side-question",
+        "side-question-running",
+        "side-question-missing-parent",
+      ].includes(scenario);
       const fixture = yield* cleanupFixture();
       fixture.setSettings({
         storageCleanup: {
@@ -712,9 +721,10 @@ describe("subagent worktree ownership", () => {
               ? "t3/15a6e5ae"
               : "feature",
         worktreePath: fixture.worktree,
+        ...(sideQuestion ? { sideChat: true } : {}),
         lineage: {
           parentThreadId:
-            scenario === "missing-parent"
+            scenario === "missing-parent" || scenario === "side-question-missing-parent"
               ? ThreadId.make("missing")
               : scenario === "cycle"
                 ? ThreadId.make("child")
@@ -724,9 +734,14 @@ describe("subagent worktree ownership", () => {
           rootThreadId:
             scenario === "wrong-root" ? ThreadId.make("other-root") : root.lineage.rootThreadId,
           relationshipToParent:
-            scenario === "fork" ? "fork" : scenario === "unrelated" ? null : "subagent",
+            scenario === "fork"
+              ? "fork"
+              : scenario === "unrelated" || sideQuestion
+                ? null
+                : "subagent",
         },
-        status: scenario === "running" ? "running" : "completed",
+        status:
+          scenario === "running" || scenario === "side-question-running" ? "running" : "completed",
         pendingBackgroundTasks: scenario === "pending" ? [{ taskId: "task", kind: "command" }] : [],
         latestRunCompletedAt:
           scenario === "recent-activity" || scenario === "recent-inactive"
@@ -739,11 +754,17 @@ describe("subagent worktree ownership", () => {
       const grandchild = {
         ...child,
         id: ThreadId.make("grandchild"),
-        lineage: { ...child.lineage, parentThreadId: child.id },
+        ...(scenario === "side-question-grandchild" ? { sideChat: true } : {}),
+        lineage: {
+          ...child.lineage,
+          parentThreadId: child.id,
+          relationshipToParent:
+            scenario === "side-question-grandchild" ? null : child.lineage.relationshipToParent,
+        },
       };
       // The worktree owner can follow its children in the snapshot.
       fixture.setThreads(
-        scenario === "grandchild"
+        scenario === "grandchild" || scenario === "side-question-grandchild"
           ? [grandchild, child, root]
           : scenario === "isolated-owner" || scenario === "fork-owner"
             ? [child, root, shell({ id: ThreadId.make("ancestor") })]
@@ -759,7 +780,14 @@ describe("subagent worktree ownership", () => {
           root,
         ]);
       const report = yield* fixture.service.runNow;
-      const removed = ["idle", "grandchild", "isolated-owner", "fork-owner"].includes(scenario);
+      const removed = [
+        "idle",
+        "grandchild",
+        "isolated-owner",
+        "fork-owner",
+        "side-question",
+        "side-question-grandchild",
+      ].includes(scenario);
       const shared = [
         "unrelated",
         "fork",
@@ -767,6 +795,7 @@ describe("subagent worktree ownership", () => {
         "cycle",
         "two-tops",
         "wrong-root",
+        "side-question-missing-parent",
       ].includes(scenario);
       expect(yield* fixture.fs.exists(fixture.worktree)).toBe(!removed);
       expect(report.entries[0]).toMatchObject({
@@ -774,12 +803,12 @@ describe("subagent worktree ownership", () => {
         outcome: removed ? "removed" : "kept",
         reason: removed
           ? "Settled for 20 days"
-          : scenario === "running" || scenario === "pending"
+          : scenario === "running" || scenario === "pending" || scenario === "side-question-running"
             ? "Thread is running or has pending work"
             : shared
               ? "Shared by 2 threads"
               : scenario === "null-branch" || scenario === "stale-branch"
-                ? "A subagent thread's branch differs from this worktree's branch"
+                ? "A child thread's branch differs from this worktree's branch"
                 : scenario === "recent-activity"
                   ? "Settled for 2 of 8 days"
                   : scenario === "recent-inactive"

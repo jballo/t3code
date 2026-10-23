@@ -1686,6 +1686,10 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
+              // A side question's read-only sandbox; the host is relaunched when it changes.
+              disableWrite: ProviderAdapter.isReadOnlySandboxPolicy(
+                input.runtimePolicy.sandboxPolicy,
+              ),
             },
             options.createHost,
           ).pipe(
@@ -2269,7 +2273,17 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             const entry = pending.get(args.requestId);
             if (!entry) return yield* protocolError("This Muse request is no longer pending");
             if (entry.native.type === "approval") yield* decideApproval(entry, args.decision);
-            else {
+            else if (
+              args.answers === undefined &&
+              (args.decision === "decline" || args.decision === "cancel")
+            ) {
+              // Muse rejects empty answers, so a declined question is cancelled.
+              entry.response = { decision: args.decision };
+              yield* request("userInput/cancel", {
+                userInputId: entry.native.value.userInputId,
+                reason: "Declined in T3 Code.",
+              }).pipe(Effect.tapError(() => Effect.sync(() => delete entry.response)));
+            } else {
               const questionRequest = entry.native.value;
               const answers = [];
               for (const question of questionRequest.questions) {

@@ -93,6 +93,9 @@ export const make = Effect.gen(function* () {
         WHERE threads.deleted_at IS NULL
           AND threads.archived_at IS NULL
           AND projects.deleted_at IS NULL
+          -- A /btw side question repeats its parent's transcript in its first
+          -- message, so it would match the parent's terms and take its slots.
+          AND json_extract(threads.payload_json, '$.sideChat') IS NOT 1
           AND messages.streaming = 0
           AND messages.role IN ('user', 'assistant')
           AND json_extract(messages.payload_json, '$.text') LIKE ${pattern} ESCAPE '!'

@@ -155,7 +155,11 @@ export const readThread = Effect.fn("mcp.readThread")(function* <
   const context = yield* readCaller();
   const targetId = yield* resolveThreadId(context, threadId);
   const shell = yield* context.threads.getThreadShell(targetId).pipe(Effect.mapError(unavailable));
-  if (shell === null || shell.deletedAt !== null) {
+  if (
+    shell === null ||
+    shell.deletedAt !== null ||
+    OrchestrationMcp.isHiddenSideQuestion(shell, context.scope.thread?.threadId)
+  ) {
     return yield* OrchestrationMcp.threadNotFound(
       context.threads,
       targetId,

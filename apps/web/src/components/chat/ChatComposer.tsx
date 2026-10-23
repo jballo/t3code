@@ -314,6 +314,7 @@ export interface ChatComposerHandle {
     text: string,
     options?: { ensureLeadingBoundary?: boolean; clipboardData?: DataTransfer },
   ) => boolean;
+  insertTextAtStart: (text: string) => boolean;
   pasteTextAtEnd: (text: string, options?: { bypassAutoAttachment?: boolean }) => boolean;
   citeAssistantText: (
     citation: AssistantCitation,
@@ -404,6 +405,8 @@ export interface ChatComposerProps {
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
   onUsageLimitsCommand?: (() => void) | undefined;
+  /** Offers `/btw` in the slash menu. ChatView runs the command on send. */
+  sideQuestionsAvailable?: boolean | undefined;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -1205,6 +1208,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     threadPullRequests,
     planModeUiEnabled,
     compactSlashCommandAvailable,
+    sideQuestionsAvailable: props.sideQuestionsAvailable === true,
     selectedProvider,
     selectedProviderSkills,
     selectedProviderSlashCommands,
@@ -1954,6 +1958,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         return;
       }
+      if (item.command === "btw") {
+        // The question is typed after the command, so it stays as text. Sending
+        // it bare is what browses earlier questions, and that clears the draft.
+        const replacement = "/btw ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       if (!planModeUiEnabled) return;
       void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
       const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
@@ -2642,7 +2666,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const insertComposerText = (
     text: string,
-    position: "cursor" | "end",
+    position: "cursor" | "start" | "end",
     options?: {
       ensureLeadingBoundary?: boolean;
       citationCommentAnchor?: AssistantCitationSourceAnchor;
@@ -2663,7 +2687,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       text = importPastedComposerText(options.clipboardData, importContextFragment);
     }
     const prompt = promptRef.current;
-    const cursor = position === "cursor" ? readComposerSnapshot().expandedCursor : prompt.length;
+    const cursor =
+      position === "cursor"
+        ? readComposerSnapshot().expandedCursor
+        : position === "start"
+          ? 0
+          : prompt.length;
     const needsLeadingSpace =
       (options?.ensureLeadingBoundary ?? false) &&
       cursor > 0 &&
@@ -2682,7 +2711,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             },
             focusEditorAfterReplace: false,
           }
-        : undefined,
+        : position === "start"
+          ? // The caret stays at the end like every other outside insert. Palette
+            // dismissal and the phone composer's expansion refocus there anyway.
+            { expandedCursorAfterReplace: prompt.length - rangeEnd + text.length }
+          : undefined,
     );
   };
   const insertComposerTextStable = useStableCallback(insertComposerText);
@@ -2749,8 +2782,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => resolveActiveComposerTrigger().trigger?.kind === "path",
   );
 
-  const insertComposerTextAtEnd: ChatComposerHandle["insertTextAtEnd"] = (text, options) => {
-    const inserted = insertComposerText(text, "end", options);
+  const insertComposerTextAtEdge = (
+    text: string,
+    position: "start" | "end",
+    options?: Parameters<ChatComposerHandle["insertTextAtEnd"]>[1],
+  ): boolean => {
+    const inserted = insertComposerText(text, position, options);
     if (inserted && isComposerCollapsedMobile) {
       // The expanded editor is hidden at phone widths, so its scheduled
       // focus cannot expand the composer by itself. Reveal it before the
@@ -2759,7 +2796,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     return inserted;
   };
+  const insertComposerTextAtEnd: ChatComposerHandle["insertTextAtEnd"] = (text, options) =>
+    insertComposerTextAtEdge(text, "end", options);
   const insertComposerTextAtEndStable = useStableCallback(insertComposerTextAtEnd);
+  const insertComposerTextAtStart: ChatComposerHandle["insertTextAtStart"] = (text) =>
+    insertComposerTextAtEdge(text, "start");
+  const insertComposerTextAtStartStable = useStableCallback(insertComposerTextAtStart);
 
   const addComposerFolders = (folders: File[]) => {
     const target = folderDropTarget({
@@ -3106,6 +3148,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         (pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0) > 0 ||
         pendingDraftWork.has(attachmentTargetKey),
       insertTextAtEnd: insertComposerTextAtEndStable,
+      insertTextAtStart: insertComposerTextAtStartStable,
       pasteTextAtEnd: (text: string, options) => {
         const shortcutArmed = consumePasteAsTextShortcut(pasteAsTextShortcutUntilRef);
         const bypassAutoAttachment = options?.bypassAutoAttachment === true || shortcutArmed;
@@ -3318,6 +3361,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       insertComposerDraftTerminalContext,
       insertComposerTextStable,
       insertComposerTextAtEndStable,
+      insertComposerTextAtStartStable,
       promptRef,
       composerImagesRef,
       composerFilesRef,

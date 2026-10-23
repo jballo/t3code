@@ -305,6 +305,22 @@ const CURSOR_AGENT_SETTING_SOURCES = [
   "plugins",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+/**
+ * Cursor's sandbox and plan mode both still let its edit tools write, so a
+ * read-only sandbox (a side question) is limited to the tools that only read.
+ * An allowlist keeps tools Cursor adds later out until they are known safe.
+ */
+const CURSOR_READ_ONLY_TOOLS = [
+  "read",
+  "grep",
+  "glob",
+  "ls",
+  "semSearch",
+  "readLints",
+  "webSearch",
+  "webFetch",
+] as const;
+
 export function makeCursorAgentOptions(input: {
   readonly apiKey?: string;
   readonly modelSelection: ModelSelection;
@@ -319,6 +335,9 @@ export function makeCursorAgentOptions(input: {
     model: cursorSdkModelSelection(input.modelSelection),
     name: `T3 Code ${input.threadId}`,
     mode: input.runtimePolicy.interactionMode === "plan" ? "plan" : "agent",
+    ...(ProviderAdapter.isReadOnlySandboxPolicy(input.runtimePolicy.sandboxPolicy)
+      ? { tools: [...CURSOR_READ_ONLY_TOOLS] }
+      : {}),
     ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
     local: {
       ...(input.runtimePolicy.cwd === null ? {} : { cwd: input.runtimePolicy.cwd }),

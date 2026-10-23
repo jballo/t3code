@@ -25,6 +25,7 @@ import {
   ProviderTurnId,
   RunAttemptId,
   RunId,
+  type RuntimeRequestId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -1470,6 +1471,237 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           });
         }
         assert.isEmpty(assistantMessages(harness.events));
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect.each(["child", "grandchild"] as const)(
+    "asks a %s subagent's question on the thread that started the turn",
+    (depth) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = `${depth}-question-thread`;
+          const nativeTurnId = `${depth}-question-turn`;
+          const event = (
+            label: string,
+            method: string,
+            params: unknown,
+          ): CodexReplay.CodexAppServerReplayEntry => ({
+            type: "emit_inbound",
+            label,
+            frame: { method, params },
+          });
+          const turn = (threadId: string, turnId: string, status: "inProgress" | "completed") =>
+            event(
+              `${turnId} ${status}`,
+              status === "inProgress" ? "turn/started" : "turn/completed",
+              { threadId, turn: makeCodexReplayTurn({ id: turnId, status }) },
+            );
+          const spawn = (parent: readonly [string, string], child: readonly [string, string]) => [
+            event(`${child[0]} spawned`, "item/completed", {
+              item: {
+                type: "subAgentActivity",
+                id: `${child[0]}-spawn`,
+                kind: "started",
+                agentThreadId: child[0],
+                agentPath: `/root/${child[0]}`,
+              },
+              threadId: parent[0],
+              turnId: parent[1],
+              completedAtMs: 1782622441000,
+            }),
+            turn(child[0], child[1], "inProgress"),
+          ];
+          const root = [nativeThreadId, nativeTurnId] as const;
+          const child = [`${depth}-child-thread`, `${depth}-child-turn`] as const;
+          const grandchild = [`${depth}-grandchild-thread`, `${depth}-grandchild-turn`] as const;
+          const asker = depth === "child" ? child : grandchild;
+          const transcript = makeCodexReplayTranscript({
+            scenario: `${depth}-subagent-question`,
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Delegate it." }),
+              ...spawn(root, child),
+              ...(depth === "grandchild" ? spawn(child, grandchild) : []),
+              {
+                type: "emit_inbound",
+                label: "subagent question",
+                frame: {
+                  id: 50,
+                  method: "item/tool/requestUserInput",
+                  params: {
+                    threadId: asker[0],
+                    turnId: asker[1],
+                    itemId: `${depth}-question-call`,
+                    questions: [
+                      {
+                        id: "branch",
+                        header: "Branch",
+                        question: "Which branch?",
+                        isOther: false,
+                        isSecret: false,
+                        options: [{ label: "main", description: "The default branch." }],
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                type: "expect_outbound",
+                label: "subagent answer",
+                frame: { id: 50, result: { answers: { branch: { answers: ["main"] } } } },
+              },
+              ...(depth === "grandchild" ? [turn(grandchild[0], grandchild[1], "completed")] : []),
+              turn(child[0], child[1], "completed"),
+              turn(nativeThreadId, nativeTurnId, "completed"),
+            ],
+          });
+          const asked =
+            yield* Deferred.make<
+              Extract<ProviderAdapter.ProviderAdapterV2Event, { type: "runtime_request.updated" }>
+            >();
+          const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+            event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+              ? Deferred.succeed(asked, event)
+              : Effect.void,
+          );
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`${depth}-question-attempt`),
+              text: "Delegate it.",
+            }),
+          );
+          const question = yield* Deferred.await(asked);
+          assert.equal(question.threadId, harness.threadId);
+          assert.equal(question.runtimeRequest.kind, "user_input");
+          assert.equal(
+            question.runtimeRequest.providerTurnId,
+            (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+              driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+              nativeTurnId,
+            }),
+          );
+          const node = harness.events.find(
+            (candidate) =>
+              candidate.type === "node.updated" &&
+              candidate.node.id === question.runtimeRequest.nodeId,
+          );
+          const topSubagent = harness
+            .subagentUpdates()
+            .find((update) => update.subagent.threadId === harness.threadId);
+          assert.isDefined(topSubagent);
+          assert.equal(node?.type === "node.updated" && node.node.threadId, harness.threadId);
+          assert.equal(
+            node?.type === "node.updated" && node.node.parentNodeId,
+            topSubagent.subagent.id,
+          );
+          const item = harness.events.find(
+            (candidate) =>
+              candidate.type === "turn_item.updated" &&
+              candidate.turnItem.type === "user_input_request",
+          );
+          assert.equal(
+            item?.type === "turn_item.updated" && item.turnItem.threadId,
+            harness.threadId,
+          );
+
+          yield* harness.runtime.respondToRuntimeRequest({
+            requestId: question.runtimeRequest.id,
+            answers: { branch: "main" },
+          });
+          yield* harness.firstTerminal;
+          assert.deepEqual(
+            harness.terminalEvents().map((terminal) => terminal.status),
+            ["completed"],
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  it.effect("releases a declined Codex question with no answers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const nativeThreadId = "declined-question-thread";
+        const nativeTurnId = "declined-question-turn";
+        const transcript = makeCodexReplayTranscript({
+          scenario: "declined-question",
+          entries: [
+            ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Ask me." }),
+            {
+              type: "emit_inbound",
+              label: "question",
+              frame: {
+                id: 50,
+                method: "item/tool/requestUserInput",
+                params: {
+                  threadId: nativeThreadId,
+                  turnId: nativeTurnId,
+                  itemId: "declined-question-call",
+                  questions: [
+                    {
+                      id: "branch",
+                      header: "Branch",
+                      question: "Which branch?",
+                      isOther: false,
+                      isSecret: false,
+                      options: [{ label: "main", description: "The default branch." }],
+                    },
+                  ],
+                },
+              },
+            },
+            {
+              type: "expect_outbound",
+              label: "no answers",
+              frame: { id: 50, result: { answers: {} } },
+            },
+            {
+              type: "emit_inbound",
+              label: "complete",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        });
+        const asked = yield* Deferred.make<RuntimeRequestId>();
+        const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+          event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+            ? Deferred.succeed(asked, event.runtimeRequest.id)
+            : Effect.void,
+        );
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("declined-question-attempt"),
+            text: "Ask me.",
+          }),
+        );
+        yield* harness.runtime.respondToRuntimeRequest({
+          requestId: yield* Deferred.await(asked),
+          decision: "decline",
+        });
+        yield* harness.firstTerminal;
+        assert.deepEqual(
+          harness.terminalEvents().map((terminal) => terminal.status),
+          ["completed"],
+        );
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),

@@ -537,15 +537,18 @@ export function resolveSidebarRowThreadId(
 }
 
 export function filterSidebarV2VisibleThreads<
-  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> & {
-    environmentId: string;
-    projectId: string;
-  },
+  T extends Pick<SidebarThreadSummary, "archivedAt" | "lineage"> &
+    Partial<Pick<SidebarThreadSummary, "sideChat">> & {
+      environmentId: string;
+      projectId: string;
+    },
 >(threads: readonly T[], scopedProjectKeys: ReadonlySet<string> | null): T[] {
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
       !isSidebarSubagentThread(thread) &&
+      // Side chats show only in their parent's island.
+      thread.sideChat !== true &&
       (scopedProjectKeys === null ||
         scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
   );
@@ -1303,7 +1306,9 @@ export function sortLogicalProjectsForSidebar<
 
 export function sortSidebarV2ProjectGroups<
   TProject extends LogicalSidebarProject,
-  TThread extends ScopedSidebarThread & Pick<SidebarThreadSummary, "lineage">,
+  TThread extends ScopedSidebarThread &
+    Pick<SidebarThreadSummary, "lineage"> &
+    Partial<Pick<SidebarThreadSummary, "sideChat">>,
 >(
   projects: readonly TProject[],
   threads: readonly TThread[],

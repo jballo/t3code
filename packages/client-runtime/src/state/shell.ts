@@ -372,7 +372,10 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         }
 
         if (!canResume || Option.isNone(current.snapshot)) {
-          return supportsCompletionMarker ? { requestCompletionMarker: true as const } : {};
+          return {
+            acceptSideChats: true,
+            ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
+          };
         }
         if (!supportsCompletionMarker) {
           yield* SubscriptionRef.update(state, (value) => ({
@@ -383,6 +386,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         }
         return {
           afterSequence: current.snapshot.value.snapshotSequence,
+          acceptSideChats: true,
           ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
         };
       }),

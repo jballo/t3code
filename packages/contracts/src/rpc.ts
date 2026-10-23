@@ -156,6 +156,11 @@ import {
   OrchestrationSearchThreadsResult,
 } from "./threadSearch.ts";
 import {
+  OrchestrationAskSideQuestionError,
+  OrchestrationAskSideQuestionInput,
+  OrchestrationAskSideQuestionResult,
+} from "./sideQuestion.ts";
+import {
   ProviderUploadFeedbackError,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -1663,6 +1668,12 @@ const WsOrchestrationV2SearchThreadsRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.s
   error: Schema.Union([OrchestrationSearchThreadsError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationV2AskSideQuestionRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.askSideQuestion, {
+  payload: OrchestrationAskSideQuestionInput,
+  success: OrchestrationAskSideQuestionResult,
+  error: Schema.Union([OrchestrationAskSideQuestionError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationV2GetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot,
   {
@@ -2069,6 +2080,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,
   WsOrchestrationV2SearchThreadsRpc,
+  WsOrchestrationV2AskSideQuestionRpc,
   WsOrchestrationV2SearchThreadRpc,
   WsOrchestrationV2SearchThreadStreamRpc,
   WsOrchestrationV2GetArchivedShellSnapshotRpc,

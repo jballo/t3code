@@ -50,13 +50,36 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
+/**
+ * A side question shares its parent's worktree while the parent may be editing
+ * it, and its card has nobody to answer an approval. So it never writes: no
+ * approvals are asked and the sandbox is read-only, which Claude, Codex and the
+ * ACP adapters each map natively. Adapters that only read the mode get the
+ * strictest one, and the reactor declines anything they still ask.
+ */
+function withSideQuestionPolicy(
+  thread: Pick<OrchestrationV2AppThread, "sideChat">,
+  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): ProviderAdapter.ProviderAdapterV2RuntimePolicy {
+  return thread.sideChat === true
+    ? ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        ...policy,
+        runtimeMode: "approval-required",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly" },
+      })
+    : policy;
+}
+
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
   resolve: (input) =>
-    Effect.succeed({
-      runtimeMode: input.thread.runtimeMode,
-      interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
-    }),
+    Effect.succeed(
+      withSideQuestionPolicy(input.thread, {
+        runtimeMode: input.thread.runtimeMode,
+        interactionMode: input.thread.interactionMode,
+        cwd: input.thread.worktreePath,
+      }),
+    ),
 });
 
 function providerRuntimeMode(
@@ -111,11 +134,14 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
-        return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
-          interactionMode: input.thread.interactionMode,
-          cwd,
-        });
+        return withSideQuestionPolicy(
+          input.thread,
+          ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
+            interactionMode: input.thread.interactionMode,
+            cwd,
+          }),
+        );
       }),
     });
   }),

@@ -8,6 +8,7 @@ export interface ComposerThreadCandidate {
   readonly title: string;
   readonly updatedAt: string;
   readonly archivedAt: string | null;
+  readonly sideChat: boolean;
 }
 
 export interface ComposerThreadItem {
@@ -20,7 +21,7 @@ export interface ComposerThreadItem {
 
 /**
  * The agent can only read threads on its own server, so candidates stay within the
- * composer's environment.
+ * composer's environment. Side questions are hidden from agents, so they never match.
  */
 export function matchComposerThreadItems(input: {
   shells: ReadonlyArray<ComposerThreadCandidate>;
@@ -36,6 +37,7 @@ export function matchComposerThreadItems(input: {
         shell.environmentId === input.environmentId &&
         shell.id !== input.excludeThreadId &&
         shell.archivedAt === null &&
+        !shell.sideChat &&
         shell.title.toLowerCase().includes(query),
     )
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))

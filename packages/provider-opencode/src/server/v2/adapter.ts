@@ -332,8 +332,9 @@ type TurnTerminal =
 type Rule = Permission.Rule;
 type RulesPolicy = Pick<
   ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-  "runtimeMode" | "interactionMode"
+  "runtimeMode" | "interactionMode" | "sandboxPolicy"
 >;
+
 type NativeForm = EventOf<"form.created">["data"]["form"];
 
 interface PendingRequest {
@@ -385,7 +386,7 @@ const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
         { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
       ];
 
-const sessionRules = (
+export const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
@@ -403,6 +404,10 @@ const sessionRules = (
   // are never denied: the free tier refuses sessions whose rules deny them.
   ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
   ...paths,
+  // A read-only sandbox (a side question) denies edits after `paths`, so no
+  // agent path rule allows one back; its shell stays "ask", and the side
+  // question reactor declines what it asks.
+  ...(ProviderAdapter.isReadOnlySandboxPolicy(policy.sandboxPolicy) ? [rule("edit", "deny")] : []),
   ...mcpRules(mcpServerName),
 ];
 

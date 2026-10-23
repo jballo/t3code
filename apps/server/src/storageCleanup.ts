@@ -145,7 +145,10 @@ export function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): nu
   );
 }
 
-/** Only a complete subagent chain within this worktree shares ownership. */
+/**
+ * Only a complete chain of subagents and side questions within this worktree
+ * shares ownership. A side question inherits its parent's checkout.
+ */
 function worktreeOwner(threads: ReadonlyArray<OrchestrationV2ThreadShell>) {
   if (threads.length === 1) return threads[0];
   const byId = new Map(threads.map((thread) => [thread.id, thread]));
@@ -158,7 +161,7 @@ function worktreeOwner(threads: ReadonlyArray<OrchestrationV2ThreadShell>) {
     while (current.id !== owner.id) {
       if (
         seen.has(current.id) ||
-        current.lineage.relationshipToParent !== "subagent" ||
+        (current.lineage.relationshipToParent !== "subagent" && current.sideChat !== true) ||
         current.lineage.rootThreadId !== owner.lineage.rootThreadId
       )
         return undefined;
@@ -788,7 +791,7 @@ const make = Effect.gen(function* () {
         )
           return keep("thread is running or has pending work");
         if (group.some((member) => member.branch !== thread.branch))
-          return keep("a subagent thread's branch differs from this worktree's branch");
+          return keep("a child thread's branch differs from this worktree's branch");
         if (hasTerminal(worktreePath)) return keep("open terminal");
         // Roots are canonical, so compare canonical paths. A symlinked parent
         // (a linked drive) is fine; a symlinked worktree directory is not.

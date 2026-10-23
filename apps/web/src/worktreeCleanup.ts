@@ -8,9 +8,15 @@ function normalizeWorktreePath(path: string | null): string | null {
   return trimmed;
 }
 
+/**
+ * `deletedThreadIds` are threads already deleted earlier in the same batch,
+ * which may still be in the client's list. The server deletes a thread's
+ * attached side questions with it, so they never keep the worktree alive.
+ */
 export function getOrphanedWorktreePathForThread(
-  threads: ReadonlyArray<Pick<ThreadShell, "id" | "worktreePath">>,
+  threads: ReadonlyArray<Pick<ThreadShell, "id" | "worktreePath" | "sideChat" | "lineage">>,
   threadId: ThreadShell["id"],
+  deletedThreadIds: ReadonlySet<ThreadShell["id"]> = new Set(),
 ): string | null {
   const targetThread = threads.find((thread) => thread.id === threadId);
   if (!targetThread) {
@@ -22,8 +28,10 @@ export function getOrphanedWorktreePathForThread(
     return null;
   }
 
+  const isDeleted = (id: ThreadShell["id"] | null) =>
+    id === threadId || (id !== null && deletedThreadIds.has(id));
   const isShared = threads.some((thread) => {
-    if (thread.id === threadId) {
+    if (isDeleted(thread.id) || (thread.sideChat && isDeleted(thread.lineage.parentThreadId))) {
       return false;
     }
     return normalizeWorktreePath(thread.worktreePath) === targetWorktreePath;

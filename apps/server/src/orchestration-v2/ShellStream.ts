@@ -54,12 +54,15 @@ export function buildActiveShellSnapshot(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly threads: OrchestrationV2ThreadShellSnapshot;
   readonly snapshotSequence: number;
+  readonly acceptSideChats: boolean;
 }): OrchestrationV2ShellSnapshot {
   return {
     schemaVersion: input.threads.schemaVersion,
     snapshotSequence: input.snapshotSequence,
     projects: input.projects,
-    threads: input.threads.threads,
+    threads: input.acceptSideChats
+      ? input.threads.threads
+      : input.threads.threads.filter((thread) => thread.sideChat !== true),
     archivedThreads: [],
   };
 }

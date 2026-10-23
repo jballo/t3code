@@ -35,6 +35,7 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
@@ -54,6 +55,10 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   reasoningEffort: Schema.optional(Schema.String),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
+
+/** Side questions run with this sandbox. Adapters without a native sandbox enforce it themselves. */
+export const isReadOnlySandboxPolicy = (sandboxPolicy: unknown): boolean =>
+  Predicate.hasProperty(sandboxPolicy, "type") && sandboxPolicy.type === "readOnly";
 
 export const ProviderAdapterV2TurnMessage = Schema.Struct({
   messageId: MessageId,

@@ -85,6 +85,10 @@ export function useThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(environmentThreadShells.threadShellsAtom);
 }
 
+export function useThreadShellsWithSideChats(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.threadShellsWithSideChatsAtom);
+}
+
 export function useNavigationThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(environmentThreadShells.navigationThreadShellsAtom);
 }

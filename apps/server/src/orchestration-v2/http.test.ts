@@ -96,27 +96,64 @@ const items = Schema.decodeUnknownSync(Schema.Array(OrchestrationV2TurnItem))(
   })),
 );
 
+const makeOrchestrationHttp = Effect.fn(function* (isAllowed: () => boolean) {
+  const runtime = ProviderReplayHarness.layerWithRegistry(
+    { name: "thread-transcript" },
+    ProviderAdapterRegistry.layerFromAdapters([]),
+    { runEffectWorker: false },
+  );
+  const services = yield* Layer.build(
+    Layer.mergeAll(
+      runtime,
+      ThreadManagementService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(runtime, CommandReceiptStore.layer, ServerSettings.layerTest({})),
+        ),
+      ),
+      OrchestrationEventStore.layer,
+      ProjectStore.layer,
+    ).pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+  );
+  const routes = HttpApiBuilder.layer(TranscriptTestApi).pipe(
+    Layer.provide(OrchestrationHttp.layer),
+    Layer.provide(
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(environmentId),
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(EnvironmentAuthenticatedAuth, (effect) =>
+        Effect.suspend(() =>
+          effect.pipe(
+            Effect.provideService(EnvironmentAuthenticatedPrincipal, {
+              sessionId: AuthSessionId.make("test-session"),
+              subject: "test",
+              method: "bearer-access-token",
+              scopes: new Set<AuthEnvironmentScope>(isAllowed() ? ["orchestration:read"] : []),
+            }),
+          ),
+        ),
+      ),
+    ),
+    Layer.provide(Layer.succeedContext(services)),
+    Layer.provide(Layer.mock(ProjectEnrichmentService)({})),
+    Layer.provide(HttpPlatform.layer),
+    Layer.provide(Etag.layerWeak),
+    Layer.provide(NodeServices.layer),
+  );
+  const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true });
+  yield* Effect.addFinalizer(() => Effect.promise(dispose));
+  return {
+    services,
+    eventSink: Context.get(services, EventSinkV2),
+    handler,
+  };
+});
+
 it.effect("exports full history with size, scope, and missing-thread checks", () =>
   Effect.gen(function* () {
     let allowed = true;
-    const runtime = ProviderReplayHarness.layerWithRegistry(
-      { name: "thread-transcript" },
-      ProviderAdapterRegistry.layerFromAdapters([]),
-      { runEffectWorker: false },
-    );
-    const services = yield* Layer.build(
-      Layer.mergeAll(
-        runtime,
-        ThreadManagementService.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(runtime, CommandReceiptStore.layer, ServerSettings.layerTest({})),
-          ),
-        ),
-        OrchestrationEventStore.layer,
-        ProjectStore.layer,
-      ).pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
-    );
-    const eventSink = Context.get(services, EventSinkV2);
+    const { services, eventSink, handler } = yield* makeOrchestrationHttp(() => allowed);
     yield* eventSink.write({
       events: [
         {
@@ -128,35 +165,6 @@ it.effect("exports full history with size, scope, and missing-thread checks", ()
         },
       ],
     });
-    const routes = HttpApiBuilder.layer(TranscriptTestApi).pipe(
-      Layer.provide(OrchestrationHttp.layer),
-      Layer.provide(
-        Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
-          getEnvironmentId: Effect.succeed(environmentId),
-        }),
-      ),
-      Layer.provide(
-        Layer.succeed(EnvironmentAuthenticatedAuth, (effect) =>
-          Effect.suspend(() =>
-            effect.pipe(
-              Effect.provideService(EnvironmentAuthenticatedPrincipal, {
-                sessionId: AuthSessionId.make("test-session"),
-                subject: "test",
-                method: "bearer-access-token",
-                scopes: new Set<AuthEnvironmentScope>(allowed ? ["orchestration:read"] : []),
-              }),
-            ),
-          ),
-        ),
-      ),
-      Layer.provide(Layer.succeedContext(services)),
-      Layer.provide(Layer.mock(ProjectEnrichmentService)({})),
-      Layer.provide(HttpPlatform.layer),
-      Layer.provide(Etag.layerWeak),
-      Layer.provide(NodeServices.layer),
-    );
-    const { handler, dispose } = HttpRouter.toWebHandler(routes, { disableLogger: true });
-    yield* Effect.addFinalizer(() => Effect.promise(dispose));
     const read = (threadId: ThreadId) =>
       Effect.promise(() =>
         handler(
@@ -240,5 +248,47 @@ it.effect("exports full history with size, scope, and missing-thread checks", ()
     expect((yield* read(ThreadId.make("missing"))).status).toBe(404);
     allowed = false;
     expect((yield* read(thread.id)).status).toBe(403);
+  }),
+);
+
+it.effect("leaves side chats out of the shell snapshot unless the client accepts them", () =>
+  Effect.gen(function* () {
+    const { eventSink, handler } = yield* makeOrchestrationHttp(() => true);
+    const sideChat: OrchestrationV2AppThread = {
+      ...thread,
+      id: ThreadId.make("side-chat"),
+      title: "What does this do?",
+      lineage: { rootThreadId: thread.id, parentThreadId: thread.id, relationshipToParent: "fork" },
+      sideChat: true,
+    };
+    yield* eventSink.write({
+      events: [thread, sideChat].map((payload) => ({
+        id: EventId.make(`create-${payload.id}`),
+        type: "thread.created" as const,
+        threadId: payload.id,
+        occurredAt: now,
+        payload,
+      })),
+    });
+    const shellThreadIds = (query: string) =>
+      Effect.gen(function* () {
+        const response = yield* Effect.promise(() =>
+          handler(
+            new Request(`http://localhost/api/orchestration/shell${query}`, {
+              headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
+            }),
+          ),
+        );
+        expect(response.status).toBe(200);
+        const body = (yield* Effect.promise(() => response.json())) as {
+          readonly threads: ReadonlyArray<{ readonly id: string }>;
+        };
+        return body.threads.map((shell) => shell.id).toSorted();
+      });
+
+    expect(yield* shellThreadIds("")).toEqual([thread.id]);
+    expect(yield* shellThreadIds("?acceptSideChats=1")).toEqual(
+      [thread.id, sideChat.id].toSorted(),
+    );
   }),
 );

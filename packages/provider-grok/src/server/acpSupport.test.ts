@@ -18,6 +18,17 @@ describe("grokAcpSpawnArgs", () => {
       "stdio",
     ]);
   });
+
+  it("gives a read-only Grok its read-only agent profile", () => {
+    expect(grokAcpSpawnArgs("approval-required", "/tmp/t3-read-only.md")).toEqual([
+      "--permission-mode",
+      "default",
+      "agent",
+      "--agent-profile",
+      "/tmp/t3-read-only.md",
+      "stdio",
+    ]);
+  });
 });
 
 describe("applyGrokAcpModelSelection", () => {

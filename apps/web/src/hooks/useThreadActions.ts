@@ -431,13 +431,10 @@ export function useThreadActions() {
             }),
           )
         : undefined;
-    const survivingThreads =
-      deletedIds && deletedIds.size > 0
-        ? threads.filter((entry) => entry.id === threadRef.threadId || !deletedIds.has(entry.id))
-        : threads;
     const orphanedWorktreePath = getOrphanedWorktreePathForThread(
-      survivingThreads,
+      threads,
       threadRef.threadId,
+      deletedIds,
     );
     const displayWorktreePath = orphanedWorktreePath
       ? formatWorktreePathForDisplay(orphanedWorktreePath)

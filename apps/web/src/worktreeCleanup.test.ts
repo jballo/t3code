@@ -82,6 +82,65 @@ describe("getOrphanedWorktreePathForThread", () => {
     const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
     expect(result).toBe("/tmp/repo/worktrees/feature-a");
   });
+
+  describe("side questions", () => {
+    const worktreePath = "/tmp/repo/worktrees/feature-a";
+    const sideQuestionOf = (id: string, parentId: string) =>
+      makeThread({
+        id: ThreadId.make(id),
+        worktreePath,
+        sideChat: true,
+        lineage: {
+          rootThreadId: ThreadId.make(parentId),
+          parentThreadId: ThreadId.make(parentId),
+          relationshipToParent: null,
+        },
+      });
+
+    it("does not count the target's own side questions, which are deleted with it", () => {
+      const threads = [
+        makeThread({ id: ThreadId.make("thread-1"), worktreePath }),
+        sideQuestionOf("side-1", "thread-1"),
+        sideQuestionOf("side-2", "thread-1"),
+      ];
+      const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
+      expect(result).toBe(worktreePath);
+    });
+
+    it("counts a side question whose parent is not being deleted", () => {
+      const threads = [
+        makeThread({ id: ThreadId.make("thread-1"), worktreePath }),
+        makeThread({ id: ThreadId.make("thread-2"), worktreePath: "/tmp/repo/worktrees/other" }),
+        sideQuestionOf("side-2", "thread-2"),
+      ];
+      const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
+      expect(result).toBeNull();
+    });
+
+    it("still counts an unrelated thread on the same worktree", () => {
+      const threads = [
+        makeThread({ id: ThreadId.make("thread-1"), worktreePath }),
+        sideQuestionOf("side-1", "thread-1"),
+        makeThread({ id: ThreadId.make("thread-2"), worktreePath }),
+      ];
+      const result = getOrphanedWorktreePathForThread(threads, ThreadId.make("thread-1"));
+      expect(result).toBeNull();
+    });
+
+    it("ignores threads already deleted in the same batch and their side questions", () => {
+      const threads = [
+        makeThread({ id: ThreadId.make("thread-1"), worktreePath }),
+        makeThread({ id: ThreadId.make("thread-2"), worktreePath }),
+        sideQuestionOf("side-2", "thread-2"),
+      ];
+      const result = getOrphanedWorktreePathForThread(
+        threads,
+        ThreadId.make("thread-1"),
+        new Set([ThreadId.make("thread-2")]),
+      );
+      expect(result).toBe(worktreePath);
+    });
+  });
 });
 
 describe("formatWorktreePathForDisplay", () => {

@@ -3915,6 +3915,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
+    // A fork's lineage, transfer and inherited items all name its source, which
+    // would hand a hidden side question's id to every thread reader.
+    if (sourceProjection.thread.sideChat === true) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Fork a side question from its parent's island to keep it as a thread.",
+      });
+    }
     // The source is not under this command's lock, so check the modes this
     // command copies, not an earlier read the source's user could outrun.
     yield* refuseAboveDispatchModeLimit(command, command.sourceThreadId, sourceProjection.thread);

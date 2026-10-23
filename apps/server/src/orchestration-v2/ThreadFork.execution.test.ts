@@ -202,6 +202,101 @@ it.effect("a persisted fork leaves PR watching with its parent until explicitly 
   }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 
+it.effect("a side question is forked only by promoting it", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const { instanceId, modelSelection } = forkCases[0]!;
+    const parentThreadId = ThreadId.make("fork-side-parent");
+    const sideChatId = ThreadId.make("fork-side-question");
+    const sideRunId = RunId.make("fork-side-question-run");
+    const base = {
+      projectId: ProjectId.make("fork-side-project"),
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("fork-side-create-parent"),
+      threadId: parentThreadId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("fork-side-create-question"),
+      threadId: sideChatId,
+      title: "Side question",
+      parentThreadId,
+      sideChat: true,
+      ...base,
+    });
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make("fork-side-question-run"),
+          type: "run.created",
+          threadId: sideChatId,
+          runId: sideRunId,
+          occurredAt: now,
+          payload: {
+            id: sideRunId,
+            threadId: sideChatId,
+            ordinal: 1,
+            providerInstanceId: instanceId,
+            modelSelection,
+            providerThreadId: null,
+            userMessageId: MessageId.make("fork-side-question-message"),
+            rootNodeId: null,
+            activeAttemptId: null,
+            status: "completed",
+            requestedAt: now,
+            startedAt: now,
+            completedAt: now,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        },
+      ],
+    });
+    const fork = (commandId: string, targetThreadId: ThreadId) =>
+      orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make(commandId),
+        sourceThreadId: sideChatId,
+        targetThreadId,
+        sourcePoint: { type: "run", runId: sideRunId },
+        createdBy: "user",
+        creationSource: "web",
+      });
+
+    // A fork would name the hidden side question as its parent.
+    const refusedId = ThreadId.make("fork-side-refused");
+    const refused = yield* fork("fork-side-refused", refusedId).pipe(Effect.flip);
+    assert.equal(refused._tag, "OrchestratorDispatchError");
+    assert.isNull(yield* orchestrator.getThreadShell(refusedId));
+
+    yield* orchestrator.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make("fork-side-promote"),
+      threadId: sideChatId,
+      sideChat: false,
+    });
+    const forkedId = ThreadId.make("fork-side-forked");
+    yield* fork("fork-side-forked", forkedId);
+    assert.equal(
+      (yield* orchestrator.getThreadShell(forkedId))?.lineage.parentThreadId,
+      sideChatId,
+    );
+  }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
 it.effect.each(forkCases)(
   "bounds $driver context when continuing a fork of a $status run",
   ({ driver, status, instanceId, modelSelection, layer }) =>

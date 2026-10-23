@@ -84,12 +84,9 @@ function makeSourceRun(status: OrchestrationV2Run["status"]): OrchestrationV2Run
   };
 }
 
-function makeSourceProjection(
-  sourceRun: OrchestrationV2Run,
-  thread: OrchestrationV2AppThread = makeSourceThread(),
-): OrchestrationV2ThreadProjection {
+function makeSourceProjection(sourceRun: OrchestrationV2Run): OrchestrationV2ThreadProjection {
   return {
-    thread,
+    thread: makeSourceThread(),
     runs: [sourceRun],
     attempts: [],
     nodes: [],
@@ -230,17 +227,6 @@ it.effect("preserves pull request context without inheriting any watches", () =>
     assert.deepEqual(sourceProjection.thread.pullRequests, watchedLinks);
     assert.deepEqual(sourceProjection.thread.pullRequests[0]?.watch, watch);
     assert.deepEqual(sourceProjection.thread.pullRequests[1]?.watch, watch);
-  }),
-);
-
-it.effect("forks a side question into an ordinary thread", () =>
-  Effect.gen(function* () {
-    const sourceRun = makeSourceRun("completed");
-    const result = yield* planFork(
-      sourceRun,
-      makeSourceProjection(sourceRun, { ...makeSourceThread(), sideChat: true }),
-    );
-    assert.isFalse(result.targetThread.sideChat);
   }),
 );
 

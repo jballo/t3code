@@ -3511,7 +3511,14 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThreadStable}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 workflowOpening={paintOnlyDisplayedTimeline ? null : workflowOpening}
-                onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRunStable}
+                onForkFromRun={
+                  // The server refuses it: a fork would name the hidden side question.
+                  serverThread?.sideChat === true
+                    ? undefined
+                    : paintOnlyDisplayedTimeline
+                      ? async () => {}
+                      : onForkFromRunStable
+                }
                 onRollbackCheckpoint={onTimelineRollbackCheckpointStable}
                 supportsConversationRollback={
                   !paintOnlyDisplayedTimeline && supportsConversationRollback

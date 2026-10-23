@@ -71,6 +71,9 @@ export function SideQuestionCard(props: {
   useEffect(() => {
     if (askedArrived) settleAsked(parentKey);
   }, [askedArrived, parentKey, settleAsked]);
+  // Only this card watches for the arrival, so leaving the thread ends the wait;
+  // otherwise a question deleted while away would hide the card on return.
+  useEffect(() => () => settleAsked(parentKey), [parentKey, settleAsked]);
   const childRef = visible === null ? null : scopeThreadRef(environmentId, visible.id);
   const projection = useThreadProjection(childRef);
   const collapsed = view.collapsed;

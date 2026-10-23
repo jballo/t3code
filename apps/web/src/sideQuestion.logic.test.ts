@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ThreadId } from "@t3tools/contracts";
 
 import {
@@ -125,12 +125,35 @@ describe("asking a side question", () => {
     expect(resolveVisibleSideQuestion([asked, answered], view())).toBe(answered);
   });
 
+  // What the card does when it first shows the asked question, and when it
+  // leaves the thread.
+  const settle = () => useSideQuestionStore.getState().settleAsked(parentKey);
+
   it("falls back to the newest question once the asked one is gone elsewhere", () => {
     expect(resolveVisibleSideQuestion([asked, answered], view())).toBe(asked);
-    // What the card does when it first sees the asked question.
-    useSideQuestionStore.getState().settleAsked(parentKey);
+    settle();
     // Deleted, or forked into a regular thread, from another client.
     expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
+  });
+
+  it("falls back to the newest question when the asked one came and went while away", () => {
+    settle();
+    // Arrived and was deleted elsewhere while another thread was on screen.
+    expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
+  });
+
+  it("still shows the asked question when it lands after the user comes back", () => {
+    settle();
+    expect(resolveVisibleSideQuestion([asked, answered], view())).toBe(asked);
+  });
+
+  it("leaves storage alone when there is nothing to settle", () => {
+    settle();
+    const { storage } = useSideQuestionStore.persist.getOptions();
+    const setItem = vi.spyOn(storage!, "setItem");
+    settle();
+    expect(setItem).not.toHaveBeenCalled();
+    setItem.mockRestore();
   });
 
   it("forgets an ask that was in flight when the page reloaded", async () => {
@@ -142,6 +165,18 @@ describe("asking a side question", () => {
     expect(view().justAsked).toBeUndefined();
     // Had it landed, the reloaded snapshot would hold it; it didn't, so the
     // newest question is the one to show.
+    expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
+  });
+
+  it("drops a pending ask saved by an older build", async () => {
+    const { storage, name } = useSideQuestionStore.persist.getOptions();
+    const saved = { viewingThreadId: "d", justAsked: true, collapsed: false, hidden: false };
+    await storage!.setItem(name!, {
+      state: { byParentKey: { [parentKey]: saved } } as never,
+      version: 0,
+    });
+    await useSideQuestionStore.persist.rehydrate();
+    expect(view().justAsked).toBeUndefined();
     expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
   });
 });

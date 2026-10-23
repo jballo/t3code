@@ -4124,15 +4124,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         }) =>
           Effect.gen(function* () {
             const createdAt = yield* DateTime.now;
+            // A native subagent's thread takes no input, so a question that
+            // blocks it is asked where its approvals are. An async question
+            // blocks nothing and replaces the subagent's own message item, so
+            // it stays on the subagent's thread.
+            const { owner, subagent } =
+              input.responseMode === "message"
+                ? { owner: input.context, subagent: null }
+                : approvalOwnerCodexTurn(input.context);
             const requestId = yield* idAllocator.allocate.runtimeRequest({
               driver: CODEX_PROVIDER,
-              providerTurnId: input.context.providerTurnId,
+              providerTurnId: owner.providerTurnId,
               nativeRequestId: input.nativeRequestId,
             });
-            const providerSessionId = input.context.input.providerThread.providerSessionId;
+            const providerSessionId = owner.input.providerThread.providerSessionId;
             if (providerSessionId === null) {
               return yield* toProtocolError(
-                `Provider thread ${input.context.providerThread.id} is missing a provider session id.`,
+                `Provider thread ${owner.providerThread.id} is missing a provider session id.`,
               );
             }
             const questions = input.questions.map((question, index) => ({
@@ -4153,18 +4161,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               driver: CODEX_PROVIDER,
               nativeItemId: input.nativeItemId,
             });
-            const ordinal = yield* resolveItemOrdinal(input.context, input.nativeItemId);
+            const ordinal = yield* resolveItemOrdinal(owner, input.nativeItemId);
             const node: OrchestrationV2ExecutionNode = {
               id: nodeId,
-              threadId: input.context.projectionThreadId,
-              runId: input.context.projectionRunId,
-              parentNodeId: input.context.itemParentNodeId,
-              rootNodeId: input.context.rootNodeId,
+              threadId: owner.projectionThreadId,
+              runId: owner.projectionRunId,
+              parentNodeId: subagent?.subagentNodeId ?? input.context.itemParentNodeId,
+              rootNodeId: owner.rootNodeId,
               kind: "user_input_request",
               status: "waiting",
               countsForRun: false,
-              providerThreadId: input.context.providerThread.id,
-              providerTurnId: input.context.providerTurnId,
+              providerThreadId: owner.providerThread.id,
+              providerTurnId: owner.providerTurnId,
               nativeItemRef: codexNativeItemRef(input.nativeItemId),
               runtimeRequestId: requestId,
               checkpointScopeId: null,
@@ -4174,7 +4182,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const request: OrchestrationV2RuntimeRequest = {
               id: requestId,
               nodeId,
-              providerTurnId: input.context.providerTurnId,
+              providerTurnId: owner.providerTurnId,
               nativeRequestRef: {
                 driver: CODEX_PROVIDER,
                 nativeId: input.nativeRequestId,
@@ -4191,11 +4199,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             };
             const turnItem: OrchestrationV2TurnItem = {
               id: turnItemId,
-              threadId: input.context.projectionThreadId,
-              runId: input.context.projectionRunId,
+              threadId: owner.projectionThreadId,
+              runId: owner.projectionRunId,
               nodeId,
-              providerThreadId: input.context.providerThread.id,
-              providerTurnId: input.context.providerTurnId,
+              providerThreadId: owner.providerThread.id,
+              providerTurnId: owner.providerTurnId,
               nativeItemRef: codexNativeItemRef(input.nativeItemId),
               parentItemId: null,
               ordinal,
@@ -7084,7 +7092,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 });
               }
               if (pending.type === "user_input") {
-                if (requestInput.answers === undefined) {
+                const declined =
+                  requestInput.decision === "decline" || requestInput.decision === "cancel";
+                if (requestInput.answers === undefined && !declined) {
                   return yield* new ProviderAdapter.ProviderAdapterRuntimeRequestResponseError({
                     driver: CODEX_PROVIDER,
                     requestId: requestInput.requestId,
@@ -7093,7 +7103,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     ),
                   });
                 }
-                yield* Deferred.succeed(pending.answers, requestInput.answers);
+                // Codex has no way to refuse a question; no answers is how it
+                // is skipped.
+                yield* Deferred.succeed(pending.answers, requestInput.answers ?? {});
                 return;
               }
               if (requestInput.decision === undefined) {

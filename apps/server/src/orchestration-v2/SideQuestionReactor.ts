@@ -63,23 +63,16 @@ const make = Effect.gen(function* () {
       }
       const thread = yield* projections.getThread(event.threadId);
       if (thread.sideChat !== true) return;
-      const commandId = CommandId.make(
-        `server:side-question-decline:${event.threadId}:${event.payload.id}`,
-      );
-      if (event.payload.kind === "user_input") {
-        yield* engine.dispatch({
-          type: "thread.user-input.dismiss",
-          commandId,
-          threadId: event.threadId,
-          requestId: event.payload.id,
-        });
-        return;
-      }
       yield* engine.dispatch({
         type: "runtime-request.respond",
-        commandId,
+        commandId: CommandId.make(
+          `server:side-question-decline:${event.threadId}:${event.payload.id}`,
+        ),
         threadId: event.threadId,
         requestId: event.payload.id,
+        // Questions too: a live one cannot be dismissed, and each adapter
+        // releases a declined question natively, so the side question never
+        // waits on it.
         decision: "decline",
       });
     }).pipe(

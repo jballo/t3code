@@ -465,6 +465,64 @@ describe("OpenCodeAdapterV2", () => {
       ),
   );
 
+  it.effect("rejects a declined question instead of answering it", () =>
+    Effect.gen(function* () {
+      const nativeEvents = asyncEventStream();
+      const calls: Array<{ readonly method: string; readonly input: unknown }> = [];
+      const harness = yield* makeOpenCodeRuntimeHarness("decline-question", "root", {
+        event: { subscribe: async () => ({ stream: nativeEvents.stream }) },
+        session: {
+          create: async () => ({ data: { id: "root", time: { created: 1, updated: 1 } } }),
+          promptAsync: async () => ({ data: true }),
+          abort: async () => ({ data: true }),
+          children: async () => ({ data: [] }),
+        },
+        question: {
+          reply: async (input: unknown) => {
+            calls.push({ method: "reply", input });
+            return { data: true };
+          },
+          reject: async (input: unknown) => {
+            calls.push({ method: "reject", input });
+            return { data: true };
+          },
+        },
+      });
+      yield* harness.startTurn();
+      const received = yield* harness.runtime.events.pipe(
+        Stream.filter((event) => event.type === "runtime_request.updated"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.promise(() =>
+        nativeEvents.push({
+          type: "question.asked",
+          properties: {
+            id: "request",
+            sessionID: "root",
+            questions: [
+              {
+                header: "Choice",
+                question: "Which?",
+                options: [{ label: "Yes", description: "Proceed" }],
+              },
+            ],
+          },
+        }),
+      );
+      const request = (yield* Fiber.join(received))[0]!.runtimeRequest;
+      yield* harness.runtime.respondToRuntimeRequest({
+        requestId: request.id,
+        decision: "decline",
+      });
+      assert.deepEqual(calls, [{ method: "reject", input: { requestID: "request" } }]);
+    }).pipe(
+      Effect.provide(Layer.merge(IdAllocator.layer, McpProviderSessions.layer)),
+      Effect.scoped,
+    ),
+  );
+
   it.effect("aborts external root and descendants before closing the event stream", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make();

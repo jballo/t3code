@@ -112,7 +112,7 @@ function layerFor(commands: Array<OrchestrationV2ServerCommand>) {
   );
 }
 
-it.effect("declines what a side question's provider asks, and dismisses its questions", () =>
+it.effect("declines what a side question's provider asks, questions included", () =>
   Effect.gen(function* () {
     const commands: Array<OrchestrationV2ServerCommand> = [];
     const reactor = yield* SideQuestionReactor.SideQuestionReactor.pipe(
@@ -132,12 +132,17 @@ it.effect("declines what a side question's provider asks, and dismisses its ques
     );
     yield* reactor.handle(requestEvent({ threadId: sideThreadId, kind: "auth_refresh" }));
 
-    assert.deepEqual(summarize(commands), [
-      { type: "runtime-request.respond", threadId: sideThreadId },
-      { type: "thread.user-input.dismiss", threadId: sideThreadId },
-    ]);
-    const respond = commands[0]!;
-    assert.isTrue(respond.type === "runtime-request.respond" && respond.decision === "decline");
+    assert.deepEqual(
+      commands.map((command) =>
+        command.type === "runtime-request.respond"
+          ? { threadId: command.threadId, decision: command.decision, answers: command.answers }
+          : command.type,
+      ),
+      [
+        { threadId: sideThreadId, decision: "decline", answers: undefined },
+        { threadId: sideThreadId, decision: "decline", answers: undefined },
+      ],
+    );
   }),
 );
 

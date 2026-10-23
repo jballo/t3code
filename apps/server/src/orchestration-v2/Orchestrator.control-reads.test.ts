@@ -932,6 +932,120 @@ it.effect("deletes the side questions of a thread deleted while nothing reacted"
   }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
 );
 
+it.effect("releases a side question's live approval and question without an answer", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const reactor = yield* SideQuestionReactor.SideQuestionReactor;
+    const parentId = ThreadId.make("thread:side-question-live-parent");
+    const sideId = ThreadId.make("thread:side-question-live");
+    const sessionId = ProviderSessionId.make("session:side-question-live");
+    const now = yield* DateTime.now;
+    const base = {
+      projectId: ProjectId.make("project:side-question-live"),
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("live-create-parent"),
+      threadId: parentId,
+      title: "Parent",
+      ...base,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("live-create-side"),
+      threadId: sideId,
+      title: "Side question",
+      parentThreadId: parentId,
+      sideChat: true,
+      ...base,
+    });
+    yield* projections.apply({
+      id: EventId.make("live-attach"),
+      type: "provider-session.attached",
+      threadId: sideId,
+      occurredAt: now,
+      payload: {
+        id: sessionId,
+        driver: adapter.driver,
+        providerInstanceId: instanceId,
+        status: "ready",
+        cwd: "/repo",
+        model: modelSelection.model,
+        capabilities: CodexProviderCapabilitiesV2,
+        createdAt: now,
+        updatedAt: now,
+        lastError: null,
+      },
+    });
+    const ask = Effect.fn("controlReadsTest.askSideQuestion")(function* (
+      kind: "user_input" | "command",
+    ) {
+      const requestId = RuntimeRequestId.make(`request:side-question-live:${kind}`);
+      const nodeId = NodeId.make(`node:side-question-live:${kind}`);
+      yield* projections.apply({
+        id: EventId.make(`node:side-question-live:${kind}`),
+        type: "node.updated",
+        threadId: sideId,
+        occurredAt: now,
+        payload: {
+          id: nodeId,
+          threadId: sideId,
+          runId: null,
+          parentNodeId: null,
+          rootNodeId: nodeId,
+          kind: kind === "user_input" ? "user_input_request" : "approval_request",
+          status: "waiting",
+          countsForRun: false,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          runtimeRequestId: requestId,
+          checkpointScopeId: null,
+          startedAt: now,
+          completedAt: null,
+        },
+      });
+      const event = {
+        id: EventId.make(`request:side-question-live:${kind}`),
+        type: "runtime-request.updated",
+        threadId: sideId,
+        occurredAt: now,
+        payload: {
+          id: requestId,
+          nodeId,
+          providerTurnId: null,
+          nativeRequestRef: null,
+          kind,
+          status: "pending",
+          responseCapability: { type: "live", providerSessionId: sessionId },
+          createdAt: now,
+          resolvedAt: null,
+        },
+      } satisfies OrchestrationV2DomainEvent;
+      yield* projections.apply(event);
+      yield* reactor.handle(event);
+      return { requestId, nodeId };
+    });
+
+    for (const kind of ["user_input", "command"] as const) {
+      const { requestId, nodeId } = yield* ask(kind);
+      const response = yield* projections.getRuntimeResponseContext(sideId, requestId);
+      assert.equal(response.request?.status, "resolved", kind);
+      assert.equal(response.request?.decision, "decline", kind);
+      assert.equal(response.node?.id, nodeId);
+      assert.equal(response.node?.status, "cancelled", kind);
+    }
+  }).pipe(Effect.provide(Layer.provideMerge(SideQuestionReactor.layer, layerTest))),
+);
+
 it.effect("wakes the parent once when its delegated task asks a question", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;

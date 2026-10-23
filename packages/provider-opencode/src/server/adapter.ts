@@ -3446,6 +3446,18 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                 );
               }
               if (pending.question !== undefined) {
+                if (
+                  requestInput.answers === undefined &&
+                  (requestInput.decision === "decline" || requestInput.decision === "cancel")
+                ) {
+                  yield* sdkCall(
+                    "question.reject",
+                    { requestID: pending.nativeRequestId },
+                    (signal) =>
+                      client.question.reject({ requestID: pending.nativeRequestId }, { signal }),
+                  ).pipe(Effect.timeout("10 seconds"));
+                  return;
+                }
                 if (requestInput.answers === undefined) {
                   return yield* protocolError(
                     `OpenCode question request ${requestInput.requestId} requires answers`,

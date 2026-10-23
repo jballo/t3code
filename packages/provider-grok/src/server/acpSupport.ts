@@ -103,7 +103,7 @@ function grokPermissionModeArgs(runtimeMode?: RuntimeMode): ReadonlyArray<string
   }
 }
 
-export function buildGrokAcpSpawnInput(
+function buildGrokAcpSpawnInput(
   grokSettings: GrokAcpRuntimeGrokSettings | null | undefined,
   cwd: string,
   environment?: NodeJS.ProcessEnv,
@@ -127,7 +127,7 @@ function resolveGrokAuthMethodId(environment: NodeJS.ProcessEnv | undefined): st
     : GROK_AUTH_METHOD_CACHED_TOKEN;
 }
 
-export function grokAcpRuntimeProcessOwnership(
+function grokAcpRuntimeProcessOwnership(
   processGroupPlatform: NodeJS.Platform,
 ): Pick<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
@@ -194,44 +194,41 @@ const writeReadOnlyAgentProfile = Effect.gen(function* () {
   return profilePath;
 });
 
-export const makeGrokAcpRuntime = (
+export const makeGrokAcpRuntime = Effect.fn("GrokAcpSupport.makeGrokAcpRuntime")(function* (
   input: GrokAcpRuntimeInput,
-): Effect.Effect<
+): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
   ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
-> =>
-  Effect.gen(function* () {
-    const processGroupPlatform = yield* HostProcess.Platform.pipe(
-      Effect.provide(NodeServices.layer),
-    );
-    const readOnlyProfilePath = input.readOnly
-      ? yield* writeReadOnlyAgentProfile.pipe(
-          Effect.provide(NodeServices.layer),
-          Effect.mapError((cause) => new EffectAcpErrors.AcpSpawnError({ command: "grok", cause })),
-        )
-      : undefined;
-    const acpContext = yield* Layer.build(
-      AcpSessionRuntime.layer({
-        ...input,
-        spawn: buildGrokAcpSpawnInput(
-          input.grokSettings,
-          input.cwd,
-          input.environment,
-          input.runtimeMode,
-          readOnlyProfilePath,
-        ),
-        authMethodId: resolveGrokAuthMethodId(input.environment),
-        cancelMeta: { ...input.cancelMeta, ...GROK_ACP_CANCEL_META },
-        initializeMeta: GROK_ACP_INITIALIZE_META,
-        ...grokAcpRuntimeProcessOwnership(processGroupPlatform),
-      }),
-    );
-    const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
-      Effect.provide(acpContext),
-    );
-    return yield* makeXAiPromptCompletionRuntime(runtime);
-  });
+> {
+  const processGroupPlatform = yield* HostProcess.Platform.pipe(Effect.provide(NodeServices.layer));
+  const readOnlyProfilePath = input.readOnly
+    ? yield* writeReadOnlyAgentProfile.pipe(
+        Effect.provide(NodeServices.layer),
+        Effect.mapError((cause) => new EffectAcpErrors.AcpSpawnError({ command: "grok", cause })),
+      )
+    : undefined;
+  const acpContext = yield* Layer.build(
+    AcpSessionRuntime.layer({
+      ...input,
+      spawn: buildGrokAcpSpawnInput(
+        input.grokSettings,
+        input.cwd,
+        input.environment,
+        input.runtimeMode,
+        readOnlyProfilePath,
+      ),
+      authMethodId: resolveGrokAuthMethodId(input.environment),
+      cancelMeta: { ...input.cancelMeta, ...GROK_ACP_CANCEL_META },
+      initializeMeta: GROK_ACP_INITIALIZE_META,
+      ...grokAcpRuntimeProcessOwnership(processGroupPlatform),
+    }),
+  );
+  const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
+    Effect.provide(acpContext),
+  );
+  return yield* makeXAiPromptCompletionRuntime(runtime);
+});
 
 /**
  * It is the CLI's product name, not a model id the ACP accepts, so selecting it

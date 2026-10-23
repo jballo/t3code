@@ -160,10 +160,11 @@ export const readThread = Effect.fn("mcp.readThread")(function* <
     shell.deletedAt !== null ||
     OrchestrationMcp.isHiddenSideQuestion(shell, context.scope.thread?.threadId)
   ) {
-    return yield* new OrchestratorMcpFailure({
-      code: "thread_not_found",
-      message: "The thread was not found.",
-    });
+    return yield* OrchestrationMcp.threadNotFound(
+      context.threads,
+      targetId,
+      "The thread was not found.",
+    );
   }
   const projection = yield* context.threads
     .getProjectThreadRecords({ projectId: shell.projectId, threadId: targetId }, fields, {

@@ -178,7 +178,7 @@ function savedPullRequestKey(
 
 const savedPullRequestSummariesAtom = Atom.make((get) => {
   const summaries = new Map<string, PullRequestSummary>();
-  for (const thread of get(environmentThreadShells.threadShellsAtom)) {
+  for (const thread of get(environmentThreadShells.threadShellsWithSideChatsAtom)) {
     for (const link of visibleThreadPullRequests(thread.pullRequests)) {
       const summary = threadPullRequestLinkToSummary(link, thread.projectId);
       if (summary === null) continue;

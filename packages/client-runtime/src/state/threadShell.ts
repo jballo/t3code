@@ -373,7 +373,7 @@ export function createEnvironmentThreadShellAtoms(input: {
           }
           seen.add(key);
           const thread = threads.get(ref.threadId);
-          if (thread !== undefined) {
+          if (thread !== undefined && thread.sideChat !== true) {
             next.push(scopedThread(ref.environmentId, thread, subagentRequests));
           }
         }
@@ -399,8 +399,10 @@ export function createEnvironmentThreadShellAtoms(input: {
     return refs;
   }).pipe(Atom.withLabel("environment-thread-refs"));
 
-  let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
-  const threadShellsAtom = Atom.make((get) => {
+  // For readers that must still see side chats: lookups of a side chat opened as its own
+  // thread, and caches such as saved pull request metadata.
+  let previousThreadShellsWithSideChats: ReadonlyArray<EnvironmentThreadShell> = [];
+  const threadShellsWithSideChatsAtom = Atom.make((get) => {
     const next: EnvironmentThreadShell[] = [];
     for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
       const subagentRequests = get(pendingSubagentRequestsAtom(environmentId));
@@ -408,6 +410,17 @@ export function createEnvironmentThreadShellAtoms(input: {
         next.push(scopedThread(environmentId, thread, subagentRequests));
       }
     }
+    if (arrayElementsEqual(previousThreadShellsWithSideChats, next)) {
+      return previousThreadShellsWithSideChats;
+    }
+    previousThreadShellsWithSideChats = next;
+    return next;
+  }).pipe(Atom.withLabel("environment-thread-shell-list-with-side-chats"));
+
+  // Side chats show only in their parent's island, so lists, counts and pickers never see them.
+  let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
+  const threadShellsAtom = Atom.make((get) => {
+    const next = get(threadShellsWithSideChatsAtom).filter((thread) => !thread.sideChat);
     if (arrayElementsEqual(previousThreadShells, next)) {
       return previousThreadShells;
     }
@@ -422,7 +435,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     const next: EnvironmentThreadShell[] = [];
     for (const ref of get(threadRefsAtom)) {
       const shell = get(quietThreadShellAtomFamily(threadKey(ref)));
-      if (shell !== null) next.push(shell);
+      if (shell !== null && !shell.sideChat) next.push(shell);
     }
     if (arrayElementsEqual(previousQuietThreadShells, next)) return previousQuietThreadShells;
     previousQuietThreadShells = next;
@@ -460,6 +473,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     environmentThreadRefsByProjectAtom,
     threadRefsAtom,
     threadShellsAtom,
+    threadShellsWithSideChatsAtom,
     quietThreadShellsAtom,
     navigationThreadShellsAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>

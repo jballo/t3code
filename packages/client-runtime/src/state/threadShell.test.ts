@@ -139,6 +139,63 @@ describe("v2 thread shell lists", () => {
     registry.dispose();
   });
 
+  it("keeps side chats out of thread lists until they are forked", () => {
+    const { registry, threads, snapshotAtom } = makeHarness();
+    const parent = v2ThreadShell;
+    const sideChat = {
+      ...parent,
+      id: ThreadId.make("side"),
+      sideChat: true,
+      lineage: { ...parent.lineage, parentThreadId: parent.id, relationshipToParent: null },
+    };
+    registry.set(snapshotAtom(environmentId), {
+      ...v2ShellSnapshot,
+      threads: [parent, sideChat],
+    });
+    const lists = {
+      shells: threads.threadShellsAtom,
+      quiet: threads.quietThreadShellsAtom,
+      project: threads.threadShellsForProjectRefsAtom([
+        { environmentId, projectId: parent.projectId },
+      ]),
+      withSideChats: threads.threadShellsWithSideChatsAtom,
+      island: threads.sideQuestionThreadShellsAtom({ environmentId, threadId: parent.id }),
+    };
+    const disposers = Object.values(lists).map((atom) => registry.mount(atom));
+    const ids = () =>
+      Object.fromEntries(
+        Object.entries(lists).map(([name, atom]) => [
+          name,
+          registry.get(atom).map((thread) => thread.id),
+        ]),
+      );
+    expect(ids()).toEqual({
+      shells: [parent.id],
+      quiet: [parent.id],
+      project: [parent.id],
+      withSideChats: [parent.id, sideChat.id],
+      island: [sideChat.id],
+    });
+    registry.set(
+      snapshotAtom(environmentId),
+      applyShellStreamEvent(registry.get(snapshotAtom(environmentId))!, {
+        kind: "thread.updated",
+        location: "active",
+        sequence: 1,
+        thread: { ...sideChat, sideChat: false },
+      }),
+    );
+    expect(ids()).toEqual({
+      shells: [parent.id, sideChat.id],
+      quiet: [parent.id, sideChat.id],
+      project: [parent.id, sideChat.id],
+      withSideChats: [parent.id, sideChat.id],
+      island: [],
+    });
+    for (const dispose of disposers) dispose();
+    registry.dispose();
+  });
+
   it("counts a subagent question on its parent only while the subagent runs", () => {
     const { registry, threads, snapshotAtom } = makeHarness();
     const root = v2ThreadShell;

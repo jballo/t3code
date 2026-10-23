@@ -1,6 +1,6 @@
 import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
+import { useProjects, useServerConfigs, useThreadShellsWithSideChats } from "~/state/entities";
 import {
   threadPullRequestKeysEqual,
   visibleThreadPullRequests,
@@ -707,7 +707,8 @@ function PullRequestSurfaceIcon({
   const resolvedEnvironmentId =
     (surface.environmentId as EnvironmentId | undefined) ?? environmentId;
   const projects = useProjects();
-  const threads = useThreadShells();
+  // A pull request linked only from a side chat still has a saved snapshot.
+  const threads = useThreadShellsWithSideChats();
   const project = projects.find(
     (entry) => entry.environmentId === resolvedEnvironmentId && entry.id === surface.projectId,
   );

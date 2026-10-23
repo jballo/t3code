@@ -125,6 +125,10 @@ export function useAllEnvironmentProjectSnapshotsReady(): boolean {
   return useAtomValue(allEnvironmentProjectSnapshotsReadyAtom);
 }
 
+export function useThreadShellsWithSideChats(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.threadShellsWithSideChatsAtom);
+}
+
 export function useThreadShellsForProjectRefs(
   refs: ReadonlyArray<ScopedProjectRef>,
 ): ReadonlyArray<EnvironmentThreadShell> {
@@ -395,6 +399,17 @@ export function readEnvironmentThreadRefs(
   environmentId: EnvironmentId,
 ): ReadonlyArray<ScopedThreadRef> {
   return appAtomRegistry.get(environmentThreadShells.environmentThreadRefsAtom(environmentId));
+}
+
+/** Includes side chats, which removing their project deletes too. */
+export function readProjectThreadRefs(
+  projectRef: ScopedProjectRef,
+): ReadonlyArray<ScopedThreadRef> {
+  return (
+    appAtomRegistry
+      .get(environmentThreadShells.environmentThreadRefsByProjectAtom(projectRef.environmentId))
+      .get(projectRef.projectId) ?? []
+  );
 }
 
 export function readThreadShells(): ReadonlyArray<EnvironmentThreadShell> {

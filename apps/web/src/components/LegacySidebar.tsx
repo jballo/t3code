@@ -88,6 +88,7 @@ import { isMacPlatform } from "../lib/utils";
 import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import {
+  readProjectThreadRefs,
   readThreadShell,
   useProjects,
   useThreadShells,
@@ -1175,7 +1176,6 @@ function useProjectThreads(project: SidebarProjectSnapshot) {
     scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
   );
   return {
-    sidebarThreads,
     sidebarThreadByKey,
     memberProjectByScopedKey,
     memberThreadCountByPhysicalKey,
@@ -1341,7 +1341,6 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   });
   const openPrLink = useOpenPrLink();
   const {
-    sidebarThreads,
     sidebarThreadByKey,
     memberProjectByScopedKey,
     memberThreadCountByPhysicalKey,
@@ -1454,6 +1453,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   const removeProject = async (member: SidebarProjectGroupMember) => {
     const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
+    const memberThreadRefs = readProjectThreadRefs(memberProjectRef);
     const result = await deleteProject({
       environmentId: member.environmentId,
       input: {
@@ -1466,15 +1466,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     }
     await waitForProjectRemoval(memberProjectRef);
     const draftStore = useComposerDraftStore.getState();
-    releaseProjectDraftUploads(
-      memberProjectRef,
-      sidebarThreads
-        .filter(
-          (thread) =>
-            thread.environmentId === member.environmentId && thread.projectId === member.id,
-        )
-        .map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
-    );
+    releaseProjectDraftUploads(memberProjectRef, memberThreadRefs);
     const projectDraftThread = draftStore.getDraftThreadByProjectRef(memberProjectRef);
     if (projectDraftThread) {
       draftStore.clearDraftThread(projectDraftThread.draftId);

@@ -12,7 +12,7 @@ import {
   LockIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import ChatMarkdown from "../ChatMarkdown";
@@ -63,7 +63,14 @@ export function SideQuestionCard(props: {
   const setCollapsed = useSideQuestionStore((state) => state.setCollapsed);
   const show = useSideQuestionStore((state) => state.show);
   const hide = useSideQuestionStore((state) => state.hide);
-  const visible = resolveVisibleSideQuestion(shells, view.viewingThreadId);
+  const settleAsked = useSideQuestionStore((state) => state.settleAsked);
+  const visible = resolveVisibleSideQuestion(shells, view);
+  // Once the asked question has synced, losing it means it was deleted or forked
+  // elsewhere, and the card should fall back to the newest one like any other.
+  const askedArrived = view.justAsked === true && visible?.id === view.viewingThreadId;
+  useEffect(() => {
+    if (askedArrived) settleAsked(parentKey);
+  }, [askedArrived, parentKey, settleAsked]);
   const childRef = visible === null ? null : scopeThreadRef(environmentId, visible.id);
   const projection = useThreadProjection(childRef);
   const collapsed = view.collapsed;

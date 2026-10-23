@@ -11,6 +11,12 @@ import { resolveStorage } from "./lib/storage";
  */
 export interface SideQuestionViewState {
   readonly viewingThreadId: ThreadId | null;
+  /**
+   * The viewed question was just asked, so its thread may not have synced yet.
+   * Until it does, its absence means "on its way", not "deleted". Not saved: a
+   * reload drops the request that would clear it if the ask failed.
+   */
+  readonly justAsked?: boolean;
   readonly collapsed: boolean;
   readonly hidden: boolean;
 }
@@ -18,6 +24,8 @@ export interface SideQuestionViewState {
 interface SideQuestionStoreState {
   readonly byParentKey: Readonly<Record<string, SideQuestionViewState>>;
   readonly show: (parentKey: string, threadId: ThreadId) => void;
+  readonly showAsked: (parentKey: string, threadId: ThreadId) => void;
+  readonly settleAsked: (parentKey: string) => void;
   readonly setCollapsed: (parentKey: string, collapsed: boolean) => void;
   readonly clearViewing: (parentKey: string) => void;
   readonly hide: (parentKey: string) => void;
@@ -40,6 +48,26 @@ export const useSideQuestionStore = create<SideQuestionStoreState>()(
             [parentKey]: { viewingThreadId: threadId, collapsed: false, hidden: false },
           },
         })),
+      showAsked: (parentKey, threadId) =>
+        set((state) => ({
+          byParentKey: {
+            ...state.byParentKey,
+            [parentKey]: {
+              viewingThreadId: threadId,
+              justAsked: true,
+              collapsed: false,
+              hidden: false,
+            },
+          },
+        })),
+      settleAsked: (parentKey) =>
+        set((state) => {
+          const current = state.byParentKey[parentKey];
+          if (current?.justAsked !== true) return state;
+          return {
+            byParentKey: { ...state.byParentKey, [parentKey]: { ...current, justAsked: false } },
+          };
+        }),
       setCollapsed: (parentKey, collapsed) =>
         set((state) => ({
           byParentKey: {
@@ -54,7 +82,7 @@ export const useSideQuestionStore = create<SideQuestionStoreState>()(
           return {
             byParentKey: {
               ...state.byParentKey,
-              [parentKey]: { ...current, viewingThreadId: null },
+              [parentKey]: { ...current, viewingThreadId: null, justAsked: false },
             },
           };
         }),
@@ -71,7 +99,18 @@ export const useSideQuestionStore = create<SideQuestionStoreState>()(
       storage: createJSONStorage(() =>
         resolveStorage(typeof window === "undefined" ? null : window.localStorage),
       ),
-      partialize: (state) => ({ byParentKey: state.byParentKey }),
+      partialize: (state) => ({
+        byParentKey: Object.fromEntries(
+          Object.entries(state.byParentKey).map(([key, view]) => [
+            key,
+            {
+              viewingThreadId: view.viewingThreadId,
+              collapsed: view.collapsed,
+              hidden: view.hidden,
+            },
+          ]),
+        ),
+      }),
     },
   ),
 );

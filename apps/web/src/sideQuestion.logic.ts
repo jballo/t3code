@@ -8,6 +8,7 @@ import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentatio
 import { collectToolFilePaths, dynamicToolTitle } from "@t3tools/shared/toolActivity";
 
 import { providerErrorPresentation } from "./session-logic";
+import type { SideQuestionViewState } from "./sideQuestionStore";
 
 export type SideQuestionCommand =
   | { readonly kind: "ask"; readonly question: string }
@@ -31,11 +32,15 @@ type SideQuestionShell = Pick<EnvironmentThreadShell, "id" | "latestRun" | "runt
 /** The card shows the newest question, unless the user walked back to an earlier one. */
 export function resolveVisibleSideQuestion<T extends SideQuestionShell>(
   shells: ReadonlyArray<T>,
-  viewingThreadId: ThreadId | null,
+  view: Pick<SideQuestionViewState, "viewingThreadId" | "justAsked">,
 ): T | null {
-  if (viewingThreadId !== null) {
-    const viewing = shells.find((shell) => shell.id === viewingThreadId);
+  if (view.viewingThreadId !== null) {
+    const viewing = shells.find((shell) => shell.id === view.viewingThreadId);
     if (viewing !== undefined) return viewing;
+    // A new question's thread arrives after the ask, and slower over a relay.
+    // Until then the newest one is the previous question, whose title and
+    // answer would pass for this one's.
+    if (view.justAsked === true) return null;
   }
   return shells[0] ?? null;
 }

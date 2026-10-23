@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import type { ThreadId } from "@t3tools/contracts";
 
 import {
@@ -10,6 +10,7 @@ import {
   sideQuestionPrefixFor,
   sideQuestionStepTitle,
 } from "./sideQuestion.logic";
+import { selectSideQuestionView, useSideQuestionStore } from "./sideQuestionStore";
 
 const shell = (id: string, input: { runStatus?: string | null; active?: boolean } = {}) =>
   ({
@@ -72,12 +73,14 @@ describe("resolveVisibleSideQuestion", () => {
   const oldest = shell("a");
   const shells = [newest, middle, oldest];
 
+  const viewing = (id: string | null) => ({ viewingThreadId: id as ThreadId | null });
+
   it("shows the newest question unless the user is browsing", () => {
-    expect(resolveVisibleSideQuestion(shells, null)).toBe(newest);
-    expect(resolveVisibleSideQuestion(shells, "b" as ThreadId)).toBe(middle);
+    expect(resolveVisibleSideQuestion(shells, viewing(null))).toBe(newest);
+    expect(resolveVisibleSideQuestion(shells, viewing("b"))).toBe(middle);
     // A deleted question falls back to the newest one left.
-    expect(resolveVisibleSideQuestion(shells, "missing" as ThreadId)).toBe(newest);
-    expect(resolveVisibleSideQuestion([], null)).toBeNull();
+    expect(resolveVisibleSideQuestion(shells, viewing("missing"))).toBe(newest);
+    expect(resolveVisibleSideQuestion([], viewing(null))).toBeNull();
   });
 
   it("cycles newest to oldest and wraps", () => {
@@ -93,6 +96,53 @@ describe("resolveVisibleSideQuestion", () => {
     expect(sideQuestionAfterDelete(shells, "a" as ThreadId)).toBe(middle);
     expect(sideQuestionAfterDelete([newest], "c" as ThreadId)).toBeNull();
     expect(sideQuestionAfterDelete(shells, "missing" as ThreadId)).toBeNull();
+  });
+});
+
+describe("asking a side question", () => {
+  const parentKey = "env:parent";
+  const answered = shell("c", { runStatus: "completed" });
+  const asked = shell("d", { runStatus: null });
+  const view = () => selectSideQuestionView(useSideQuestionStore.getState(), parentKey);
+
+  beforeEach(() => {
+    useSideQuestionStore.setState({ byParentKey: {} });
+    useSideQuestionStore.getState().showAsked(parentKey, "d" as ThreadId);
+  });
+
+  it("shows nothing, not the previous answer, until the new question syncs", () => {
+    expect(resolveVisibleSideQuestion([answered], view())).toBeNull();
+    expect(resolveVisibleSideQuestion([asked, answered], view())).toBe(asked);
+  });
+
+  it("goes back to the newest question when the ask fails", () => {
+    useSideQuestionStore.getState().clearViewing(parentKey);
+    expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
+  });
+
+  it("keeps a question browsed to before the new one arrives", () => {
+    useSideQuestionStore.getState().show(parentKey, "c" as ThreadId);
+    expect(resolveVisibleSideQuestion([asked, answered], view())).toBe(answered);
+  });
+
+  it("falls back to the newest question once the asked one is gone elsewhere", () => {
+    expect(resolveVisibleSideQuestion([asked, answered], view())).toBe(asked);
+    // What the card does when it first sees the asked question.
+    useSideQuestionStore.getState().settleAsked(parentKey);
+    // Deleted, or forked into a regular thread, from another client.
+    expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
+  });
+
+  it("forgets an ask that was in flight when the page reloaded", async () => {
+    const { storage, name } = useSideQuestionStore.persist.getOptions();
+    expect(await storage!.getItem(name!)).toMatchObject({
+      state: { byParentKey: { [parentKey]: { viewingThreadId: "d" } } },
+    });
+    await useSideQuestionStore.persist.rehydrate();
+    expect(view().justAsked).toBeUndefined();
+    // Had it landed, the reloaded snapshot would hold it; it didn't, so the
+    // newest question is the one to show.
+    expect(resolveVisibleSideQuestion([answered], view())).toBe(answered);
   });
 });
 

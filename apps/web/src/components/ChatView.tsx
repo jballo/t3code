@@ -5825,10 +5825,8 @@ export default function ChatView(props: ChatViewProps) {
   const sideQuestionParentKey =
     sideQuestionParentRef === null ? null : scopedThreadKey(sideQuestionParentRef);
   const sideQuestionShells = useSideQuestionThreadShells(sideQuestionParentRef);
-  const sideQuestionViewingId = useSideQuestionStore(
-    (state) => selectSideQuestionView(state, sideQuestionParentKey).viewingThreadId,
-  );
   const showSideQuestion = useSideQuestionStore((state) => state.show);
+  const showAskedSideQuestion = useSideQuestionStore((state) => state.showAsked);
   const clearSideQuestionViewing = useSideQuestionStore((state) => state.clearViewing);
   const askSideQuestionCommand = useAtomCommand(orchestrationEnvironment.askSideQuestion, {
     reportFailure: false,
@@ -5837,7 +5835,7 @@ export default function ChatView(props: ChatViewProps) {
     if (serverThread === null || sideQuestionParentKey === null || !sideQuestionsAvailable) return;
     const parentThreadId = serverThread.id;
     const threadId = newThreadId();
-    showSideQuestion(sideQuestionParentKey, threadId);
+    showAskedSideQuestion(sideQuestionParentKey, threadId);
     const result = await askSideQuestionCommand({
       environmentId,
       input: {
@@ -5877,7 +5875,10 @@ export default function ChatView(props: ChatViewProps) {
   const askSideQuestionStable = useStableCallback(askSideQuestion);
   const cycleSideQuestion = () => {
     if (sideQuestionParentKey === null) return;
-    const current = resolveVisibleSideQuestion(sideQuestionShells, sideQuestionViewingId);
+    const current = resolveVisibleSideQuestion(
+      sideQuestionShells,
+      selectSideQuestionView(useSideQuestionStore.getState(), sideQuestionParentKey),
+    );
     const next = nextSideQuestionToView(sideQuestionShells, current?.id ?? null);
     if (next !== null) {
       showSideQuestion(sideQuestionParentKey, next.id);

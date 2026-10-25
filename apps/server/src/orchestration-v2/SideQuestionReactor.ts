@@ -44,8 +44,9 @@ const make = Effect.gen(function* () {
       threadId,
     });
 
-  const handle: SideQuestionReactor["Service"]["handle"] = (event) =>
-    Effect.gen(function* () {
+  // Runs for every domain event; most events return before any work is needed.
+  const handle: SideQuestionReactor["Service"]["handle"] = Effect.fnUntraced(
+    function* (event) {
       if (event.type === "thread.deleted") {
         const children = yield* projections.getSideQuestionChildThreadIds(event.threadId);
         for (const childThreadId of children) {
@@ -75,15 +76,18 @@ const make = Effect.gen(function* () {
         // waits on it.
         decision: "decline",
       });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("side question reaction failed", {
-          eventType: event.type,
-          threadId: event.threadId,
-          cause,
-        }),
+    },
+    (effect, event) =>
+      effect.pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("side question reaction failed", {
+            eventType: event.type,
+            threadId: event.threadId,
+            cause,
+          }),
+        ),
       ),
-    );
+  );
 
   const reconcile: SideQuestionReactor["Service"]["reconcile"] = () =>
     projections.getOrphanedSideQuestions().pipe(

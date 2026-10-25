@@ -167,3 +167,74 @@ it.effect("keeps the task list order when a toggle or edit rewrites updated_at",
     }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect("binds a task only to a live thread that is not a side question", () =>
+  Effect.gen(function* () {
+    const threads = new Map<string, { sideChat?: boolean; deletedAt: string | null }>([
+      ["side-question", { sideChat: true, deletedAt: null }],
+      ["promoted", { sideChat: false, deletedAt: null }],
+      ["deleted", { deletedAt: "2026-10-22T10:00:00.000Z" }],
+    ]);
+    const layerDependencies = Layer.mergeAll(
+      NodeCrypto.layer,
+      Scheduler.layer,
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        namedProjectsRoot: "/projects",
+        isScratchProject: () => Effect.succeed(false),
+      }),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({
+        getThreadShell: (threadId) => {
+          const thread = threads.get(threadId);
+          return Effect.succeed(
+            thread === undefined ? null : ({ id: threadId, ...thread } as never),
+          );
+        },
+        sendToThread: () => Effect.die("a refused binding must never deliver"),
+      }),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const input = (threadId: string, id?: string) =>
+        decodeUpsertInput({
+          ...(id === undefined ? {} : { id }),
+          title: "Review",
+          prompt: "Review the open pull requests.",
+          enabled: false,
+          schedule: { type: "interval", everyMs: 60_000 },
+          projectId: "project-side-question-binding",
+          threadId,
+          workspaceStrategy: { type: "root" },
+          modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+        });
+      const refusal = (threadId: string) =>
+        input(threadId).pipe(
+          Effect.flatMap(service.upsert),
+          Effect.flip,
+          Effect.map((error) => error.message),
+        );
+
+      expect(yield* refusal("side-question")).toBe(
+        "A schedule task cannot run in a side question.",
+      );
+      expect(yield* refusal("deleted")).toBe("The schedule task's thread was not found.");
+      // An id that does not exist yet could later be taken by a new side question.
+      expect(yield* refusal("not-yet-created")).toBe("The schedule task's thread was not found.");
+      threads.set("not-yet-created", { sideChat: true, deletedAt: null });
+      expect((yield* service.list()).tasks).toEqual([]);
+
+      const bound = yield* service.upsert(yield* input("promoted"));
+      expect(bound.task.threadId).toBe("promoted");
+      // Its thread is deleted later; the unchanged binding still lets the task be edited.
+      threads.set("promoted", { deletedAt: "2026-10-22T11:00:00.000Z" });
+      const edited = yield* service.upsert({
+        ...(yield* input("promoted", bound.task.id)),
+        title: "Edited",
+      });
+      expect(edited.task.title).toBe("Edited");
+    }).pipe(Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(layerDependencies))));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

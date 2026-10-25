@@ -832,3 +832,92 @@ it.effect("only the caller that prepared a pending upload can discard it", () =>
     ),
   ),
 );
+
+const sideQuestionId = ThreadId.make("side-question-thread");
+const promotedId = ThreadId.make("promoted-side-question-thread");
+const sideQuestionShell = (id: ThreadId): OrchestrationV2ThreadShell => ({
+  ...McpToolAccessTestkit.liveThreadShell(id),
+  ...(id === sideQuestionId ? { sideChat: true } : id === promotedId ? { sideChat: false } : {}),
+});
+const layerSideQuestionThreads = Layer.mock(ThreadManagement.ThreadManagementService)({
+  getThreadShell: (id) => Effect.succeed(sideQuestionShell(id)),
+  getProjectThreadRecords: (input) =>
+    Effect.succeed(McpToolAccessTestkit.idleThreadProjection(sideQuestionShell(input.threadId))),
+  dispatch: () => Effect.succeed({ sequence: 7, storedEvents: [] }),
+});
+const callAs = (
+  name: string,
+  args: Record<string, unknown>,
+  invocation: McpInvocationContext.McpInvocationScope,
+) =>
+  McpServer.McpServer.pipe(
+    Effect.flatMap((server) => server.callTool({ name, arguments: args })),
+    Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+    Effect.provideService(McpSchema.McpServerClient, client),
+  );
+
+it.effect(
+  "agents cannot reach a side question, but it reads itself and promotion restores it",
+  () =>
+    Effect.gen(function* () {
+      const agent = clientScope("full-access");
+      for (const [name, args] of [
+        ["t3_thread_configuration", { threadId: sideQuestionId }],
+        ["t3_queue_list", { threadId: sideQuestionId }],
+        ["t3_thread_organize", { action: "pin", threadId: sideQuestionId }],
+      ] as const) {
+        expect(declaredFailure(yield* callAs(name, args, agent)), name).toMatchObject({
+          code: "thread_not_found",
+        });
+      }
+
+      const promoted = yield* callAs("t3_thread_configuration", { threadId: promotedId }, agent);
+      expect(promoted.structuredContent).toMatchObject({ threadId: promotedId });
+      const pinned = yield* callAs(
+        "t3_thread_organize",
+        { action: "pin", threadId: promotedId },
+        agent,
+      );
+      expect(pinned.structuredContent).toMatchObject({ sequence: 7 });
+
+      const itself = yield* callAs(
+        "t3_thread_configuration",
+        {},
+        { ...scope, thread: { ...scope.thread!, threadId: sideQuestionId } },
+      );
+      expect(itself.structuredContent).toMatchObject({ threadId: sideQuestionId });
+    }).pipe(
+      Effect.provide(
+        layerThreadToolkit.pipe(
+          Layer.provideMerge(McpServer.McpServer.layer),
+          Layer.provide(NodeCrypto.layer),
+          Layer.provide(layerSideQuestionThreads),
+        ),
+      ),
+    ),
+);
+
+it.effect.each([
+  ["t3_thread_read", { threadId: sideQuestionId }],
+  ["t3_thread_wait", { threadId: sideQuestionId, timeoutMs: 1 }],
+  ["t3_thread_send", { threadId: sideQuestionId, message: "steer" }],
+] as const)("an agent cannot %s a side question", ([name, args]) =>
+  Effect.gen(function* () {
+    const result = yield* callAs(name, args, clientScope("full-access"));
+    expect(declaredFailure(result)).toMatchObject({ code: "thread_not_found" });
+  }).pipe(
+    Effect.provide(
+      layerOrchestratorToolkit.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(layerSideQuestionThreads),
+        Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
+        Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
+        Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+        Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+      ),
+    ),
+  ),
+);

@@ -36,7 +36,7 @@ import {
 } from "./acknowledged-thread-messages";
 import { appAtomRegistry } from "./atom-registry";
 import { restoredNewTaskDraftKey } from "./new-task-draft-key";
-import { useProjects, useServerConfigs, useThreadShells } from "./entities";
+import { useProjects, useServerConfigs, useThreadShellsWithSideChats } from "./entities";
 import {
   clearPendingThreadCreationOutcome,
   pendingThreadCreationOutcomesAtom,
@@ -599,7 +599,8 @@ export function useThreadOutboxDrain(): void {
   const editingQueuedMessageIds = useAtomValue(editingQueuedMessageIdsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
   const shellStatuses = useThreadOutboxShellStatuses();
-  const threads = useThreadShells();
+  // A message can be queued to a side chat opened on its own; it must still find its thread.
+  const threads = useThreadShellsWithSideChats();
   const creationOutcomes = useAtomValue(pendingThreadCreationOutcomesAtom);
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
@@ -1253,7 +1254,7 @@ export function useThreadOutboxDrain(): void {
         }
         if (deliveryAction === "send") {
           const liveThread = findThread(
-            appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+            appAtomRegistry.get(environmentThreadShells.threadShellsWithSideChatsAtom),
             nextQueuedMessage,
           );
           const liveThreadBusy = threadRuntimeIsActive(liveThread?.runtime);

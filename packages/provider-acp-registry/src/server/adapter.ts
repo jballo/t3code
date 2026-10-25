@@ -31,6 +31,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import {
@@ -81,6 +82,15 @@ export interface AcpRegistryAdapterV2Options {
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
+
+/**
+ * Claude Agent opens in the mode from the user's Claude settings, and auto or
+ * bypass never asks, so a read-only sandbox gets no request to deny. A side
+ * question runs in its Manual mode, which asks before every change.
+ */
+const claudeAgentModeForPolicy: NonNullable<AcpAdapterV2Flavor["sessionModeForPolicy"]> = (
+  policy,
+) => (ProviderAdapter.isReadOnlySandboxPolicy(policy.sandboxPolicy) ? "default" : undefined);
 
 // Mistral Vibe: its application error code for rate limits (not an ACP code).
 const MISTRAL_VIBE_RATE_LIMITED = -31001;
@@ -221,6 +231,7 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       : {}),
     ...(isClaude
       ? {
+          sessionModeForPolicy: claudeAgentModeForPolicy,
           followAgentWorkState: true,
           extractSubagentUpdate: extractClaudeSubagentUpdate,
           isProvisionalSubagentTool: isClaudeProvisionalSubagentTool,

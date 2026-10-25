@@ -1126,6 +1126,89 @@ it("excludes subagents from navigation, search and ordering while retaining user
   ).toEqual([fork.id, root.id]);
 });
 
+describe("moving a thread next to a hidden /btw side question", () => {
+  // A side question is newer than its parent, so it sorts directly above it.
+  function shells(keys: { top?: string; side?: string; parent?: string } = {}) {
+    const parent = makeThread({
+      id: ThreadId.make("parent"),
+      title: "Parent",
+      createdAt: "2026-06-01T01:00:00.000Z",
+      activeOrderKey: keys.parent ?? null,
+    });
+    const side = makeThread({
+      id: ThreadId.make("side"),
+      title: "Side question",
+      createdAt: "2026-06-01T02:00:00.000Z",
+      activeOrderKey: keys.side ?? null,
+      sideChat: true,
+      lineage: { parentThreadId: parent.id, rootThreadId: parent.id, relationshipToParent: null },
+    });
+    const top = makeThread({
+      id: ThreadId.make("top"),
+      title: "Top",
+      createdAt: "2026-06-01T03:00:00.000Z",
+      activeOrderKey: keys.top ?? null,
+    });
+    return [top, side, parent];
+  }
+
+  // Mirrors mobile moveThread: plan from the full shell list, as Home cannot see side chats.
+  function move(all: EnvironmentThreadShell[], movedId: string, direction: "up" | "down") {
+    const ordered = getThreadListV2OrderedSection({ threads: all, section: "active", now: NOW });
+    const movedKey = `${environmentId}:${movedId}`;
+    const assignments = createThreadMovePlanner({
+      allThreads: all,
+      ordered,
+      section: "active",
+      reorderableEnvironmentIds: new Set([environmentId]),
+    })(movedKey, direction);
+    expect(assignments).not.toBeNull();
+    const keys = new Map(assignments!.map(({ id, orderKey }) => [id, orderKey]));
+    const next = all.map((row) => ({
+      ...row,
+      activeOrderKey: keys.get(`${row.environmentId}:${row.id}`) ?? row.activeOrderKey,
+    }));
+    const visible = next.filter((row) => !row.sideChat);
+    const pending = createPendingThreadOrder({
+      section: "active",
+      ordered,
+      movedId: movedKey,
+      direction,
+      assignments: assignments!,
+    });
+    return {
+      assignedIds: [...keys.keys()],
+      visibleOrder: getThreadListV2OrderedSection({
+        threads: visible,
+        section: "active",
+        now: NOW,
+      }).map((row) => row.id),
+      optimisticOrder: buildThreadListV2Items({
+        threads: all.filter((row) => !row.sideChat),
+        pendingOrder: pending,
+        environmentId: null,
+        searchQuery: "",
+        now: NOW,
+      }).items.map((item) => item.thread.id),
+    };
+  }
+
+  it.each([
+    ["keyless", {}],
+    ["keyed", { top: "bb", side: "cc", parent: "dd" }],
+  ] as const)("swaps visible neighbours and never writes the side question (%s)", (_, keys) => {
+    for (const [movedId, direction] of [
+      ["parent", "up"],
+      ["top", "down"],
+    ] as const) {
+      const result = move(shells(keys), movedId, direction);
+      expect(result.visibleOrder).toEqual(["parent", "top"]);
+      expect(result.optimisticOrder).toEqual(["parent", "top"]);
+      expect(result.assignedIds).not.toContain(`${environmentId}:side`);
+    }
+  });
+});
+
 const BASE_MS = Date.parse(NOW);
 const isoAt = (ms: number) => new Date(ms).toISOString();
 const MINUTE_MS = 60_000;

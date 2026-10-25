@@ -5,6 +5,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadShell,
   ProjectId,
   ProviderInstanceId,
   RunId,
@@ -335,5 +336,61 @@ it.effect.each([
     yield* service.settleAfterRun({ projectId, threadId, runId });
 
     expect(dispatched).toEqual(settles ? ["thread.settle"] : []);
+  }),
+);
+
+it.effect("lists a project's threads without its side questions, but with promoted ones", () =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make("project:thread-management:list");
+    const shell = (id: string, extra: Partial<OrchestrationV2ThreadShell>) =>
+      ({
+        id: ThreadId.make(id),
+        projectId,
+        lineage: {
+          rootThreadId: ThreadId.make("thread:list:parent"),
+          parentThreadId: null,
+          relationshipToParent: null,
+        },
+        updatedAt: DateTime.makeUnsafe("2026-10-22T10:00:00Z"),
+        ...extra,
+      }) as OrchestrationV2ThreadShell;
+    const sideQuestionLineage = {
+      rootThreadId: ThreadId.make("thread:list:parent"),
+      parentThreadId: ThreadId.make("thread:list:parent"),
+      relationshipToParent: null,
+    };
+    const layerTest = ThreadManagementService.layer.pipe(
+      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+      Layer.provide(
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          getShellSnapshot: () =>
+            Effect.succeed({
+              schemaVersion: 1,
+              snapshotSequence: 1,
+              threads: [
+                shell("thread:list:parent", {}),
+                shell("thread:list:side-question", {
+                  sideChat: true,
+                  lineage: sideQuestionLineage,
+                }),
+                shell("thread:list:promoted", { sideChat: false, lineage: sideQuestionLineage }),
+              ],
+              archivedThreads: [],
+            }),
+        }),
+      ),
+      Layer.provide(ServerSettings.layerTest()),
+      Layer.provide(layerReceiptsTest),
+    );
+    const service = yield* ThreadManagementService.ThreadManagementService.pipe(
+      Effect.provide(layerTest),
+    );
+
+    const threads = yield* service.listProjectThreads({ projectId, includeSubagents: true });
+
+    expect(threads.map((thread) => thread.id).toSorted()).toEqual([
+      "thread:list:parent",
+      "thread:list:promoted",
+    ]);
   }),
 );

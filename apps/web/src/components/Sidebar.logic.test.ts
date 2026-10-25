@@ -7,6 +7,7 @@ import { AsyncResult } from "effect/reactivity";
 import {
   archiveSelectedThreadEntries,
   deleteSelectedThreadEntries,
+  filterSidebarV2VisibleThreads,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
   resolveSidebarRowThreadId,
@@ -200,6 +201,39 @@ describe("sidebar thread lineage helpers", () => {
     const loopA = subagentOf("thread-loop-a", ThreadId.make("thread-loop-b"));
     const loopB = subagentOf("thread-loop-b", loopA.id);
     expect(resolveSidebarRowThreadId(loopA.id, environmentId, [loopA, loopB])).toBe(loopA.id);
+  });
+
+  it("keeps side chats out of the sidebar, whether forked or only linked", () => {
+    const projectId = ProjectId.make("project-side-chat");
+    const environmentId = "env-side-chat" as never;
+    const parentId = ThreadId.make("thread-parent");
+    const ordinary = makeThreadFixture({ id: parentId, environmentId, projectId });
+    const forkedSideChat = makeThreadFixture({
+      id: ThreadId.make("thread-side-fork"),
+      environmentId,
+      projectId,
+      sideChat: true,
+      lineage: { rootThreadId: parentId, parentThreadId: parentId, relationshipToParent: "fork" },
+    });
+    const linkedSideChat = makeThreadFixture({
+      id: ThreadId.make("thread-side-linked"),
+      environmentId,
+      projectId,
+      sideChat: true,
+      lineage: { rootThreadId: parentId, parentThreadId: parentId, relationshipToParent: null },
+    });
+
+    expect(
+      filterSidebarV2VisibleThreads([ordinary, forkedSideChat, linkedSideChat], null).map(
+        (thread) => thread.id,
+      ),
+    ).toEqual([parentId]);
+    // Promoting clears the flag, and the thread joins the sidebar.
+    expect(
+      filterSidebarV2VisibleThreads([{ ...forkedSideChat, sideChat: false }], null),
+    ).toHaveLength(1);
+    // An archived parent leaves the list, and its side chats stay out with it.
+    expect(filterSidebarV2VisibleThreads([forkedSideChat, linkedSideChat], null)).toEqual([]);
   });
 });
 

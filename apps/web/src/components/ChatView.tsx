@@ -54,6 +54,7 @@ import {
   AuthPreviewOperateScope,
   AuthTerminalOperateScope,
   type AssistantCitation,
+  CommandId,
   type ChatFileAttachment,
   isProviderNativeSubagentThread,
   type EnvironmentId,
@@ -119,7 +120,7 @@ import { AsyncResult } from "effect/reactivity";
 import { isElectron } from "../env";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { useActiveThreadRef } from "../hooks/useActiveThreadRef";
-import { composerRequiresModifier } from "../composer-logic";
+import { collapseExpandedComposerCursor, composerRequiresModifier } from "../composer-logic";
 import {
   derivePhase,
   deriveActivePlanState,
@@ -170,11 +171,12 @@ import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { isEditableFocused } from "../lib/editableFocus";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { shortcutLabelForCommand } from "../keybindings";
-import { cn } from "~/lib/utils";
+import { cn, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
-import { newMessageId } from "~/lib/utils";
+import { newMessageId, newThreadId } from "~/lib/utils";
+import { buildThreadRouteParams } from "../threadRoutes";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import {
   applyProviderInstanceSettings,
@@ -222,6 +224,16 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { threadEnvironment } from "../state/threads";
+import { orchestrationEnvironment } from "../state/orchestration";
+import { SideQuestionCard } from "./chat/SideQuestionCard";
+import { subscribeSideQuestionPrefill } from "./chat/sideQuestionActionBus";
+import {
+  nextSideQuestionToView,
+  resolveVisibleSideQuestion,
+  sideQuestionAfterDelete,
+  sideQuestionPrefixFor,
+} from "../sideQuestion.logic";
+import { selectSideQuestionView, useSideQuestionStore } from "../sideQuestionStore";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import {
@@ -242,6 +254,8 @@ import {
   useThreadHistory,
   useQuietThreadShell,
   useThreadCheckpointSummaries,
+  useEnvironmentSupportsSideQuestions,
+  useSideQuestionThreadShells,
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
@@ -419,6 +433,7 @@ export default function ChatView(props: ChatViewProps) {
       currentRouteThreadKeyRef.current = null;
     };
   }, [routeThreadKey]);
+  const deleteThread = useOrchestrationCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useOrchestrationCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
@@ -2718,6 +2733,10 @@ export default function ChatView(props: ChatViewProps) {
       "thread.copyReference": ({ event }) => {
         if (!event.repeat) copyActiveThreadReference();
       },
+      "thread.sideQuestion": ({ event }) => {
+        if (!sideQuestionsAvailable) return false;
+        if (!event.repeat) prefillSideQuestionStable();
+      },
       "chat.find": () => {
         if (!isServerThread || serverConfig?.threadFind !== true) return false;
         openThreadFind();
@@ -2786,6 +2805,164 @@ export default function ChatView(props: ChatViewProps) {
     composerDraftTarget,
     setThreadError,
   });
+
+  const sideQuestionsSupported = useEnvironmentSupportsSideQuestions(environmentId);
+  const canAskSideQuestion = useAtomValue(
+    orchestrationEnvironment.askSideQuestion.permissionAtom(environmentId),
+  );
+  // A side question opened directly can't be a parent; the server refuses it.
+  const sideQuestionsAvailable =
+    sideQuestionsSupported &&
+    canAskSideQuestion &&
+    isServerThread &&
+    canOperateThread &&
+    serverThread?.sideChat !== true;
+  const sideQuestionParentRef = sideQuestionsSupported && isServerThread ? activeThreadRef : null;
+  const sideQuestionParentKey =
+    sideQuestionParentRef === null ? null : scopedThreadKey(sideQuestionParentRef);
+  const sideQuestionShells = useSideQuestionThreadShells(sideQuestionParentRef);
+  const showSideQuestion = useSideQuestionStore((state) => state.show);
+  const showAskedSideQuestion = useSideQuestionStore((state) => state.showAsked);
+  const clearSideQuestionViewing = useSideQuestionStore((state) => state.clearViewing);
+  const askSideQuestionCommand = useAtomCommand(orchestrationEnvironment.askSideQuestion, {
+    reportFailure: false,
+  });
+  const askSideQuestion = async (question: string) => {
+    if (serverThread === null || sideQuestionParentKey === null || !sideQuestionsAvailable) return;
+    const parentThreadId = serverThread.id;
+    const threadId = newThreadId();
+    showAskedSideQuestion(sideQuestionParentKey, threadId);
+    const result = await askSideQuestionCommand({
+      environmentId,
+      input: {
+        parentThreadId,
+        question,
+        threadId,
+        messageId: newMessageId(),
+        commandId: CommandId.make(randomUUID()),
+        creationSource: "web",
+      },
+    });
+    if (result._tag === "Failure") {
+      clearSideQuestionViewing(sideQuestionParentKey);
+      // The draft was cleared on send; give the question back unless something
+      // new was typed since.
+      if (promptRef.current.trim() === "") {
+        const restored = `/btw ${question}`;
+        setComposerDraftPrompt(composerDraftTarget, restored);
+        if (composerRef.current && currentRouteThreadKeyRef.current === routeThreadKey) {
+          promptRef.current = restored;
+          composerRef.current.resetCursorState({
+            cursor: collapseExpandedComposerCursor(restored, restored.length),
+            prompt: restored,
+            detectTrigger: true,
+          });
+        }
+      }
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          parentThreadId,
+          error instanceof Error ? error.message : "Failed to ask the side question.",
+        );
+      }
+    }
+  };
+  const askSideQuestionStable = useStableCallback(askSideQuestion);
+  const cycleSideQuestion = () => {
+    if (sideQuestionParentKey === null) return;
+    const current = resolveVisibleSideQuestion(
+      sideQuestionShells,
+      selectSideQuestionView(useSideQuestionStore.getState(), sideQuestionParentKey),
+    );
+    const next = nextSideQuestionToView(sideQuestionShells, current?.id ?? null);
+    if (next !== null) {
+      showSideQuestion(sideQuestionParentKey, next.id);
+      return;
+    }
+    toastManager.add(
+      stackedThreadToast({
+        type: "info",
+        title: "No side questions in this thread yet",
+        description: "Type a question after /btw to ask one.",
+      }),
+    );
+  };
+  const cycleSideQuestionStable = useStableCallback(cycleSideQuestion);
+  const prefillSideQuestion = () => {
+    if (!sideQuestionsAvailable) return;
+    const prefix = sideQuestionPrefixFor(promptRef.current);
+    // An insert focuses the editor once it renders the new text. Focusing now
+    // would move the caret in the old text, and the editor would publish that
+    // old text back over the prefix.
+    if (prefix === "" || !composerRef.current?.insertTextAtStart(prefix)) focusComposerStable();
+  };
+  const prefillSideQuestionStable = useStableCallback(prefillSideQuestion);
+  useEffect(
+    () => subscribeSideQuestionPrefill(() => prefillSideQuestionStable()),
+    [prefillSideQuestionStable],
+  );
+  const forkSideQuestion = async (threadId: ThreadId) => {
+    if (serverThread === null || sideQuestionParentKey === null) return;
+    // A side question's stored mode is only a placeholder, since its turns are
+    // forced read-only, and older questions stored Supervised. The fork should
+    // work like the thread it came from, so it takes the parent's current mode.
+    const shell = sideQuestionShells.find((candidate) => candidate.id === threadId);
+    const modeResult =
+      shell === undefined || shell.runtimeMode === serverThread.runtimeMode
+        ? AsyncResult.success(undefined)
+        : await setThreadRuntimeMode({
+            environmentId,
+            input: {
+              threadId,
+              runtimeMode: serverThread.runtimeMode,
+              createdAt: new Date().toISOString(),
+            },
+          });
+    // Promotion is otherwise just dropping the flag: the thread already has the whole exchange.
+    const result =
+      modeResult._tag === "Failure"
+        ? modeResult
+        : await updateThreadMetadata({
+            environmentId,
+            input: { threadId, sideChat: false },
+          });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          serverThread.id,
+          error instanceof Error ? error.message : "Failed to fork the side question.",
+        );
+      }
+      return;
+    }
+    clearSideQuestionViewing(sideQuestionParentKey);
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+    });
+  };
+  const forkSideQuestionStable = useStableCallback(forkSideQuestion);
+  const deleteSideQuestion = async (threadId: ThreadId) => {
+    if (serverThread === null || sideQuestionParentKey === null) return;
+    const neighbor = sideQuestionAfterDelete(sideQuestionShells, threadId);
+    // Deleting cancels a run still in progress, so no separate interrupt is needed.
+    const result = await deleteThread({ environmentId, input: { threadId } });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          serverThread.id,
+          error instanceof Error ? error.message : "Failed to delete the side question.",
+        );
+      }
+      return;
+    }
+    if (neighbor === null) clearSideQuestionViewing(sideQuestionParentKey);
+    else showSideQuestion(sideQuestionParentKey, neighbor.id);
+  };
+  const deleteSideQuestionStable = useStableCallback(deleteSideQuestion);
   const onCompactContext = () => {
     if (compactDisabled) return;
     void sendStandaloneCommand("/compact", "Failed to compact context.");
@@ -2929,6 +3106,9 @@ export default function ChatView(props: ChatViewProps) {
     handleInteractionModeChange,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
+    sideQuestionsAvailable,
+    askSideQuestion: askSideQuestionStable,
+    cycleSideQuestion: cycleSideQuestionStable,
   });
   const onImplementPlanInNewThreadStable = useStableCallback(onImplementPlanInNewThread);
 
@@ -3331,7 +3511,14 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenThread={onOpenRelatedThreadStable}
                 parentThreadLink={paintOnlyDisplayedTimeline ? null : parentThreadLink}
                 workflowOpening={paintOnlyDisplayedTimeline ? null : workflowOpening}
-                onForkFromRun={paintOnlyDisplayedTimeline ? async () => {} : onForkFromRunStable}
+                onForkFromRun={
+                  // The server refuses it: a fork would name the hidden side question.
+                  serverThread?.sideChat === true
+                    ? undefined
+                    : paintOnlyDisplayedTimeline
+                      ? async () => {}
+                      : onForkFromRunStable
+                }
                 onRollbackCheckpoint={onTimelineRollbackCheckpointStable}
                 supportsConversationRollback={
                   !paintOnlyDisplayedTimeline && supportsConversationRollback
@@ -3408,6 +3595,26 @@ export default function ChatView(props: ChatViewProps) {
               }
             >
               <div ref={draftHeroTransitionGroupRef} className="chat-composer-lane w-full">
+                {/* Outside the composer stack on purpose: the stack takes pointer events
+                    across its full width, which made the strip beside the island a dead
+                    zone that swallowed wheel scrolling and clicks meant for the thread. */}
+                {sideQuestionParentKey !== null &&
+                sideQuestionParentRef !== null &&
+                !isDraftHeroState ? (
+                  <div className="mx-auto w-full max-w-(--chat-content-max-width)">
+                    <SideQuestionCard
+                      parentKey={sideQuestionParentKey}
+                      parentThreadRef={sideQuestionParentRef}
+                      environmentId={environmentId}
+                      shells={sideQuestionShells}
+                      markdownCwd={
+                        activeThread?.worktreePath ?? activeProject?.workspaceRoot ?? undefined
+                      }
+                      onFork={forkSideQuestionStable}
+                      onDelete={deleteSideQuestionStable}
+                    />
+                  </div>
+                ) : null}
                 <div
                   data-chat-composer-stack="true"
                   className="group/composer-stack pointer-events-auto relative z-10 mx-auto w-full max-w-(--chat-content-max-width)"
@@ -3534,6 +3741,7 @@ export default function ChatView(props: ChatViewProps) {
                               resumeCompactionTokens={resumeCompactionTokens}
                               keepFullHistory={keepFullHistory}
                               onToggleKeepFullHistory={toggleKeepFullHistoryStable}
+                              sideQuestionsAvailable={sideQuestionsAvailable}
                               onUsageLimitsCommand={
                                 usageLimitsOffered &&
                                 usageLimitsKey !== null &&

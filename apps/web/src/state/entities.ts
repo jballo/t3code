@@ -125,6 +125,10 @@ export function useAllEnvironmentProjectSnapshotsReady(): boolean {
   return useAtomValue(allEnvironmentProjectSnapshotsReadyAtom);
 }
 
+export function useThreadShellsWithSideChats(): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(environmentThreadShells.threadShellsWithSideChatsAtom);
+}
+
 export function useThreadShellsForProjectRefs(
   refs: ReadonlyArray<ScopedProjectRef>,
 ): ReadonlyArray<EnvironmentThreadShell> {
@@ -162,6 +166,26 @@ export function useChildThreadInputs(ref: ScopedThreadRef | null) {
 export function useThreadProjection(ref: ScopedThreadRef | null): EnvironmentThread | null {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_PROJECTION_ATOM : environmentThreadDetails.threadAtom(ref),
+  );
+}
+
+/** A thread's side questions, newest first, dismissed ones included. */
+export function useSideQuestionThreadShells(
+  ref: ScopedThreadRef | null,
+): ReadonlyArray<EnvironmentThreadShell> {
+  return useAtomValue(
+    ref === null
+      ? EMPTY_THREAD_SHELLS_ATOM
+      : environmentThreadShells.sideQuestionThreadShellsAtom(ref),
+  );
+}
+
+/** Older servers drop the side-chat fields and would run the question as an ordinary thread. */
+export function useEnvironmentSupportsSideQuestions(environmentId: EnvironmentId | null): boolean {
+  const configs = useServerConfigs();
+  return (
+    environmentId !== null &&
+    configs.get(environmentId)?.environment.capabilities.threadSideChats === true
   );
 }
 
@@ -375,6 +399,17 @@ export function readEnvironmentThreadRefs(
   environmentId: EnvironmentId,
 ): ReadonlyArray<ScopedThreadRef> {
   return appAtomRegistry.get(environmentThreadShells.environmentThreadRefsAtom(environmentId));
+}
+
+/** Includes side chats, which removing their project deletes too. */
+export function readProjectThreadRefs(
+  projectRef: ScopedProjectRef,
+): ReadonlyArray<ScopedThreadRef> {
+  return (
+    appAtomRegistry
+      .get(environmentThreadShells.environmentThreadRefsByProjectAtom(projectRef.environmentId))
+      .get(projectRef.projectId) ?? []
+  );
 }
 
 export function readThreadShells(): ReadonlyArray<EnvironmentThreadShell> {

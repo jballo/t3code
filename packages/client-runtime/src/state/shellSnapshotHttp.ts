@@ -34,15 +34,17 @@ export const fetchEnvironmentShellSnapshot = Effect.fn(
   >;
   readonly timeoutMs?: number;
 }) {
+  const endpoint = { query: { acceptSideChats: "1" } };
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "orchestration",
     method: "GET",
-    url: (urls) => urls.shellSnapshot(),
+    url: (urls) => urls.shellSnapshot(endpoint),
     timeoutMs: input.timeoutMs ?? DEFAULT_SHELL_SNAPSHOT_TIMEOUT_MS,
     request: ({ client, headers }) =>
       client
         .shellSnapshot({
+          ...endpoint,
           headers: withOrchestrationProtocolHeader(headers),
           responseMode: "response-only",
         })

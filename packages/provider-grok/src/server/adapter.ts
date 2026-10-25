@@ -293,6 +293,7 @@ export function makeGrokAcpAdapterFlavor(
           grokSettings: options.settings,
           environment: options.environment,
           runtimeMode: grokLaunchRuntimeMode(runtimePolicy),
+          readOnly: ProviderAdapter.isReadOnlySandboxPolicy(runtimePolicy.sandboxPolicy),
         })),
     // In its Auto mode Grok decides routine actions itself and only asks about
     // what its classifier blocked, so every prompt it sends goes to the user.

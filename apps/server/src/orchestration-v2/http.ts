@@ -75,15 +75,18 @@ export const layer = HttpApiBuilder.group(
         ),
     );
 
-    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
+    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(function* (
+      acceptSideChats: boolean,
+    ) {
+      const base = buildActiveShellSnapshot({
+        ...(yield* loadShellSnapshotParts({
           sql,
           readThreads: threadManagement.readShellSnapshot({ location: "active" }),
           listProjects: projectStore.listShells(),
           latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
+        })),
+        acceptSideChats,
+      });
       const projects = yield* enrichProjectShells(base.projects);
       return { ...base, projects };
     });
@@ -154,7 +157,7 @@ export const layer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.shellSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          return yield* loadShellSnapshot().pipe(
+          return yield* loadShellSnapshot(args.query.acceptSideChats === "1").pipe(
             traceLocalHandlerWork,
             Effect.catch((cause) =>
               failEnvironmentInternal("orchestration_snapshot_failed", cause),

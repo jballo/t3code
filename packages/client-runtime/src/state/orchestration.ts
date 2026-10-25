@@ -96,6 +96,10 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:stop-workflow",
       tag: ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
     }),
+    askSideQuestion: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:ask-side-question",
+      tag: ORCHESTRATION_V2_WS_METHODS.askSideQuestion,
+    }),
     turnItem: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:turn-item",
       tag: ORCHESTRATION_V2_WS_METHODS.getTurnItem,

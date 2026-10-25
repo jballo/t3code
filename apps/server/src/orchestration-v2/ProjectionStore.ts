@@ -370,12 +370,19 @@ export interface ProjectionTimelinePageOptions {
   readonly itemId?: TurnItemId;
   readonly view?: "messages" | "activity";
   readonly limit: number;
+  /** Take the last `limit` matches. `hasMore` then means older ones were left out. */
+  readonly fromEnd?: boolean;
 }
 export interface ProjectionTimelinePage {
   readonly items: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
   readonly totalItems: number;
   readonly hasMore: boolean;
 }
+
+const pageOfTimeline = <A>(matching: ReadonlyArray<A>, options: ProjectionTimelinePageOptions) =>
+  options.fromEnd === true
+    ? matching.slice(Math.max(0, matching.length - options.limit))
+    : matching.slice(0, options.limit);
 
 export interface ShellSnapshotOptions {
   readonly location?: "active" | "archive";
@@ -451,6 +458,15 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadsWithPullRequests: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadPullRequests>, ProjectionStoreV2Error>;
+  /** Side questions still attached to a parent; a promoted one has dropped the flag. */
+  readonly getSideQuestionChildThreadIds: (
+    parentThreadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionStoreV2Error>;
+  /** Side questions still attached to a parent that has been deleted. */
+  readonly getOrphanedSideQuestions: () => Effect.Effect<
+    ReadonlyArray<{ readonly parentThreadId: ThreadId; readonly threadId: ThreadId }>,
+    ProjectionStoreV2Error
+  >;
   readonly getThreadWorktreePaths: (options?: {
     readonly includeArchived?: boolean;
   }) => Effect.Effect<
@@ -1594,6 +1610,7 @@ export function threadShellFromProjection(
     ...(projection.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: projection.thread.activeOrderKey }),
+    ...(projection.thread.sideChat === undefined ? {} : { sideChat: projection.thread.sideChat }),
     lineage: projection.thread.lineage,
     forkedFrom: projection.thread.forkedFrom,
     activeProviderThreadId: projection.thread.activeProviderThreadId,
@@ -1853,6 +1870,7 @@ function shellFromState(input: {
     ...(input.state.thread.activeOrderKey === undefined
       ? {}
       : { activeOrderKey: input.state.thread.activeOrderKey }),
+    ...(input.state.thread.sideChat === undefined ? {} : { sideChat: input.state.thread.sideChat }),
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
@@ -5535,7 +5553,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       ))
                   : row.sourceItemId === options.itemId,
               );
-            const page = matching.slice(0, options.limit);
+            const page = pageOfTimeline(matching, options);
             const items = yield* Effect.forEach(page, (row) =>
               Effect.gen(function* () {
                 if (row.synthetic !== undefined)
@@ -6086,6 +6104,41 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         )
         .pipe(Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })));
 
+    const getSideQuestionChildThreadIds: ProjectionStoreV2Shape["getSideQuestionChildThreadIds"] = (
+      parentThreadId,
+    ) =>
+      sql<{ readonly thread_id: string }>`
+          SELECT thread_id
+          FROM orchestration_v2_projection_threads
+          WHERE deleted_at IS NULL
+            AND json_extract(payload_json, '$.lineage.parentThreadId') = ${parentThreadId}
+            AND json_extract(payload_json, '$.sideChat') = 1
+          ORDER BY thread_id ASC
+        `.pipe(
+        Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
+    const getOrphanedSideQuestions: ProjectionStoreV2Shape["getOrphanedSideQuestions"] = () =>
+      sql<{ readonly parent_thread_id: string; readonly thread_id: string }>`
+          SELECT parent.thread_id AS parent_thread_id, child.thread_id
+          FROM orchestration_v2_projection_threads AS child
+          JOIN orchestration_v2_projection_threads AS parent
+            ON parent.thread_id = json_extract(child.payload_json, '$.lineage.parentThreadId')
+          WHERE child.deleted_at IS NULL
+            AND json_extract(child.payload_json, '$.sideChat') = 1
+            AND parent.deleted_at IS NOT NULL
+          ORDER BY child.thread_id ASC
+        `.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            parentThreadId: ThreadId.make(row.parent_thread_id),
+            threadId: ThreadId.make(row.thread_id),
+          })),
+        ),
+        Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+      );
+
     const getThreadsWithPullRequests: ProjectionStoreV2Shape["getThreadsWithPullRequests"] =
       Effect.fn("ProjectionStore.getThreadsWithPullRequests")(
         function* (threadId) {
@@ -6519,6 +6572,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThread,
       getSettlementCandidates,
       getThreadsWithPullRequests,
+      getSideQuestionChildThreadIds,
+      getOrphanedSideQuestions,
       getThreadWorktreePaths,
       getThreadProjection,
       getTurnStartContext,
@@ -6681,6 +6736,41 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 : [],
             ),
           ),
+        ),
+      getSideQuestionChildThreadIds: (parentThreadId) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            [...state.projections.values()]
+              .map(({ thread }) => thread)
+              .filter(
+                (thread) =>
+                  thread.deletedAt === null &&
+                  thread.sideChat === true &&
+                  thread.lineage.parentThreadId === parentThreadId,
+              )
+              .map((thread) => thread.id)
+              .toSorted(),
+          ),
+        ),
+      getOrphanedSideQuestions: () =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) => {
+            const threads = [...state.projections.values()].map(({ thread }) => thread);
+            const deletedIds = new Set(
+              threads.filter((thread) => thread.deletedAt !== null).map((thread) => thread.id),
+            );
+            return threads
+              .flatMap((thread) => {
+                const parentThreadId = thread.lineage.parentThreadId;
+                return thread.deletedAt === null &&
+                  thread.sideChat === true &&
+                  parentThreadId !== null &&
+                  deletedIds.has(parentThreadId)
+                  ? [{ parentThreadId, threadId: thread.id }]
+                  : [];
+              })
+              .toSorted((left, right) => left.threadId.localeCompare(right.threadId));
+          }),
         ),
       getThreadsWithPullRequests: (threadId) =>
         Ref.get(replayState).pipe(
@@ -7309,7 +7399,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 : row.sourceItemId === options.itemId,
             );
             return {
-              items: matching.slice(0, options.limit),
+              items: pageOfTimeline(matching, options),
               totalItems: projection.visibleTurnItems.length,
               hasMore: matching.length > options.limit,
             };

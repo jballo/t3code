@@ -59,7 +59,7 @@ vi.mock("./session", () => ({
 }));
 vi.mock("./entities", () => ({
   useProjects: () => [],
-  useThreadShells: () => [state.thread],
+  useThreadShellsWithSideChats: () => [state.thread],
   useServerConfigs: () => new Map([["secondary", state.config]]),
 }));
 vi.mock("./server", async () => {
@@ -77,7 +77,7 @@ vi.mock("./threads", async () => {
       setRuntimeMode: state.runtime,
       setInteractionMode: state.interaction,
     },
-    environmentThreadShells: { threadShellsAtom: Atom.make([state.thread]) },
+    environmentThreadShells: { threadShellsWithSideChatsAtom: Atom.make([state.thread]) },
   };
 });
 vi.mock("./use-atom-command", () => ({ useAtomCommand: <A>(command: A) => command }));

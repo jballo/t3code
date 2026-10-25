@@ -37,10 +37,12 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import { v2Now, v2Projection, v2ThreadId } from "../state/orchestrationV2TestFixtures.ts";
 import {
   archiveThread,
+  createThread,
   interruptThreadTurn,
   revertThreadCheckpoint,
   resumeThreadQueue,
   startThreadTurn,
+  updateThreadMetadata,
 } from "./commands.ts";
 
 const layerTestCrypto = Layer.succeed(
@@ -487,6 +489,43 @@ describe("V2 environment commands", () => {
               ],
         );
       }).pipe(Effect.provide(layerTestCrypto)),
+  );
+
+  it.effect("links a side chat under its parent, and promotes one", () =>
+    Effect.gen(function* () {
+      const commands: OrchestrationV2Command[] = [];
+      const supervisor = yield* makeSupervisor({ commands, projects: [] });
+      const provide = Effect.provideService(
+        EnvironmentSupervisor.EnvironmentSupervisor,
+        supervisor,
+      );
+
+      yield* createThread({
+        commandId: CommandId.make("side-linked"),
+        threadId: ThreadId.make("thread-side-linked"),
+        projectId: ProjectId.make("project-1"),
+        title: "Side chat",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        parentThreadId: v2ThreadId,
+        sideChat: true,
+      }).pipe(provide);
+      yield* updateThreadMetadata({
+        commandId: CommandId.make("side-promote"),
+        threadId: ThreadId.make("thread-side-linked"),
+        sideChat: false,
+      }).pipe(provide);
+
+      expect(commands[0]).toMatchObject({
+        type: "thread.create",
+        parentThreadId: v2ThreadId,
+        sideChat: true,
+      });
+      expect(commands[1]).toMatchObject({ type: "thread.metadata.update", sideChat: false });
+    }).pipe(Effect.provide(layerTestCrypto)),
   );
 
   it.effect("validates identified checkpoints locally for older servers", () =>

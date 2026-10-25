@@ -4,6 +4,7 @@ import * as NodeUtil from "node:util";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
+  type OrchestrationV2ThreadShell,
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskError,
@@ -351,6 +352,8 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
         Layer.mergeAll(
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadShell: (threadId) =>
+              Effect.succeed({ id: threadId, deletedAt: null } as OrchestrationV2ThreadShell),
             sendToThread: () =>
               Deferred.succeed(started, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),

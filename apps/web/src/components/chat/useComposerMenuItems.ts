@@ -55,6 +55,7 @@ export function useComposerMenuItems({
   threadPullRequests,
   planModeUiEnabled,
   compactSlashCommandAvailable,
+  sideQuestionsAvailable,
   selectedProvider,
   selectedProviderSkills,
   selectedProviderSlashCommands,
@@ -69,6 +70,8 @@ export function useComposerMenuItems({
   readonly threadPullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
   readonly planModeUiEnabled: boolean;
   readonly compactSlashCommandAvailable: boolean;
+  /** Offers `/btw`. ChatView runs the command on send. */
+  readonly sideQuestionsAvailable: boolean;
   readonly selectedProvider: ProviderDriverKind;
   readonly selectedProviderSkills: ServerProvider["skills"];
   readonly selectedProviderSlashCommands: ServerProvider["slashCommands"];
@@ -183,6 +186,19 @@ export function useComposerMenuItems({
           label: "/model",
           description: "Switch response model for this thread",
         },
+        // Only a whole message can be a side question, so the command is offered
+        // at the start of an empty draft and nowhere else.
+        ...(sideQuestionsAvailable && composerTrigger.rangeStart === 0
+          ? ([
+              {
+                id: "slash:btw",
+                type: "slash-command",
+                command: "btw",
+                label: "/btw",
+                description: "Ask a side question, or send it alone to browse earlier ones",
+              },
+            ] as const)
+          : []),
         ...(planModeUiEnabled
           ? ([
               {

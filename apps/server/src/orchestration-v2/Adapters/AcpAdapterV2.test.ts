@@ -998,6 +998,82 @@ describe("AcpAdapterV2", () => {
     }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
+  it.live("keeps a read-only sandbox in the agent's default mode", () =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const modesSentBeforePrompt = Effect.fn(function* (
+        name: string,
+        sandboxPolicy: { readonly type: "readOnly" } | undefined,
+      ) {
+        const protocolEvents = yield* Queue.unbounded<EffectAcpProtocol.AcpProtocolLogEvent>();
+        const instanceId = ProviderInstanceId.make(`acp-test-${name}`);
+        const threadId = ThreadId.make(`thread-acp-${name}`);
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            makeRuntime: makeMockRuntime({ childProcessSpawner, mockAgentPath, protocolEvents }),
+          },
+          selfInvocation: yield* resolveSelfInvocation(),
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+          ...(sandboxPolicy === undefined ? {} : { approvalPolicy: "never", sandboxPolicy }),
+        });
+        // The parent picked a permissive mode; a side question inherits the selection.
+        const modelSelection = {
+          instanceId,
+          model: "composer-2",
+          options: [{ id: "mode", value: "code" }],
+        } as const;
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`provider-session-acp-${name}`),
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* runtime.startTurn(
+          makeTurnInput({
+            threadId,
+            providerThread,
+            instanceId,
+            runtimePolicy,
+            now: yield* DateTime.now,
+            modelSelection,
+          }),
+        );
+        const modes: Array<unknown> = [];
+        while (true) {
+          const event = yield* Queue.take(protocolEvents);
+          if (event.direction !== "outgoing") continue;
+          const method = rawProtocolMethod(event);
+          if (method === "session/prompt") return modes;
+          if (
+            method === "session/set_config_option" &&
+            rawProtocolRequestParam(event, "configId") === "mode"
+          ) {
+            modes.push(rawProtocolRequestParam(event, "value"));
+          }
+        }
+      });
+
+      assert.deepEqual(yield* modesSentBeforePrompt("mode-applied", undefined), ["code"]);
+      assert.deepEqual(yield* modesSentBeforePrompt("mode-read-only", { type: "readOnly" }), []);
+    }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
   // regression: #21499 turns blocked only on T3 thread waits must show as waiting
   it.effect.each(["agent_message_chunk"] as const)(
     "keeps named ACP %s open while deriving thread wait execution state",

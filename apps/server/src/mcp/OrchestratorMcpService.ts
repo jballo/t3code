@@ -215,6 +215,16 @@ function failure(code: OrchestratorMcpFailure["code"], message: string): Orchest
 }
 
 /**
+ * A side question is the user's aside, shown only in its parent's card and
+ * deleted with it, so to every agent but its own it does not exist. Promoting
+ * one clears the flag and makes it an ordinary thread again.
+ */
+export const isHiddenSideQuestion = (
+  shell: Pick<OrchestrationV2ThreadShell, "id" | "sideChat">,
+  callerThreadId: ThreadId | undefined,
+) => shell.sideChat === true && shell.id !== callerThreadId;
+
+/**
  * A caller's thread is live while it is not archived, runs on the caller's
  * provider instance, and has an active run or a background subagent that
  * instance started. A background subagent outlives its run and calls tools
@@ -241,6 +251,8 @@ export const isLiveCallerShell = (
  * Threads an agent starts over MCP are `mcp:<uuid>`, and agents often paste the
  * bare uuid. The id is never rewritten, so permission checks keyed on it still
  * hold; the miss only names a live thread the caller could read by its full id.
+ * A side question is never named: to other agents it does not exist, and the
+ * hint would otherwise confirm it does.
  */
 export const threadNotFound = Effect.fn("OrchestratorMcpService.threadNotFound")(function* (
   threads: Pick<ThreadManagementService.ThreadManagementService["Service"], "getThreadShell">,
@@ -251,7 +263,7 @@ export const threadNotFound = Effect.fn("OrchestratorMcpService.threadNotFound")
   const shell = yield* threads.getThreadShell(prefixed).pipe(Effect.orElseSucceed(() => null));
   return yield* failure(
     "thread_not_found",
-    shell === null || shell.deletedAt !== null
+    shell === null || shell.deletedAt !== null || shell.sideChat === true
       ? message
       : `${message} Did you mean \`${prefixed}\`?`,
   );
@@ -1200,12 +1212,17 @@ const make = Effect.gen(function* () {
           );
 
   const loadTargetThread = Effect.fn("OrchestratorMcpService.loadTargetThread")(function* (
+    scope: McpInvocationScope,
     threadId: ThreadId,
   ) {
     const shell = yield* threadManagement
       .getThreadShell(threadId)
       .pipe(Effect.mapError(threadManagementFailure));
-    if (shell === null || shell.deletedAt !== null) {
+    if (
+      shell === null ||
+      shell.deletedAt !== null ||
+      isHiddenSideQuestion(shell, scope.thread?.threadId)
+    ) {
       return yield* threadNotFound(threadManagement, threadId, `Thread ${threadId} was not found.`);
     }
     return yield* loadProjectThread(shell.projectId, threadId);
@@ -1219,7 +1236,7 @@ const make = Effect.gen(function* () {
     const target =
       caller.parent !== undefined && threadId === caller.parent.thread.id
         ? caller.parent
-        : yield* loadTargetThread(threadId);
+        : yield* loadTargetThread(scope, threadId);
     return { ...caller, target } as const;
   });
 
@@ -1280,7 +1297,11 @@ const make = Effect.gen(function* () {
     const shell = yield* threadManagement
       .getThreadShell(threadId)
       .pipe(Effect.mapError(threadManagementFailure));
-    if (shell === null || shell.deletedAt !== null) {
+    if (
+      shell === null ||
+      shell.deletedAt !== null ||
+      isHiddenSideQuestion(shell, scope.thread?.threadId)
+    ) {
       return yield* threadNotFound(
         threadManagement,
         threadId,

@@ -55,6 +55,7 @@ import {
   parseStandaloneComposerSlashCommand,
 } from "../../composer-logic";
 import { resolvePlanFollowUpSubmission } from "../../proposedPlan";
+import { parseSideQuestionCommand } from "../../sideQuestion.logic";
 import { type ChatMessage } from "../../types";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { newMessageId, newThreadId } from "~/lib/utils";
@@ -230,6 +231,10 @@ interface ComposerSendInput {
   readonly acknowledgeActiveThreadWoke: () => void;
   readonly handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
   readonly handleNewThreadInActiveProject: () => void;
+  /** A `/btw` send never reaches this thread; these run it instead. */
+  readonly sideQuestionsAvailable: boolean;
+  readonly askSideQuestion: (question: string) => Promise<void>;
+  readonly cycleSideQuestion: () => void;
   readonly persistThreadSettingsForNextTurn: (input: {
     threadId: ThreadId;
     createdAt: string;
@@ -316,6 +321,9 @@ export function useComposerSend(input: ComposerSendInput) {
     handleInteractionModeChange,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
+    sideQuestionsAvailable,
+    askSideQuestion,
+    cycleSideQuestion,
   } = input;
   const handleNewThread = useNewThreadHandler();
   const navigate = useNavigate();
@@ -407,6 +415,57 @@ export function useComposerSend(input: ComposerSendInput) {
       }
       return;
     }
+    // A side question is a whole message of its own: no attachments or context
+    // ride along, and nothing is sent to this thread. It is decided before the
+    // pending-answer branch so it still works while the thread waits on a
+    // question, which is the best moment to ask one.
+    const notifyEnvironmentUnavailable = () => {
+      const toastSlot = environmentUnavailableSendToastSlotRef.current;
+      environmentUnavailableSendToastSlotRef.current =
+        (toastSlot + 1) % ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE;
+      toastManager.add({
+        ...stackedThreadToast({
+          type: "warning",
+          title: "Not connected: message not sent",
+          description: "Reconnecting to the environment. Try again once it is connected.",
+        }),
+        id: `chat-send-environment-unavailable:${toastSlot}`,
+      });
+    };
+    const sideQuestionCommand = sideQuestionsAvailable
+      ? parseSideQuestionCommand(promptRef.current)
+      : null;
+    // Side questions are text only. Sending anyway would hand the `/btw` text
+    // and the attachments to the main agent, so the draft stays as it is.
+    if (
+      sideQuestionCommand !== null &&
+      (directAnnotation || draftHasNonPromptContent(composerDraftTarget))
+    ) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "Side questions are text only",
+          description:
+            "Remove the attachments and context to ask one, or delete /btw to send your message to the main agent.",
+        }),
+      );
+      return;
+    }
+    if (sideQuestionCommand?.kind === "ask" && activeEnvironmentUnavailable) {
+      notifyEnvironmentUnavailable();
+      return;
+    }
+    if (sideQuestionCommand !== null) {
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      if (sideQuestionCommand.kind === "cycle") {
+        cycleSideQuestion();
+      } else {
+        void askSideQuestion(sideQuestionCommand.question);
+      }
+      return;
+    }
 
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
@@ -448,17 +507,7 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     if (activeEnvironmentUnavailable) {
-      const toastSlot = environmentUnavailableSendToastSlotRef.current;
-      environmentUnavailableSendToastSlotRef.current =
-        (toastSlot + 1) % ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE;
-      toastManager.add({
-        ...stackedThreadToast({
-          type: "warning",
-          title: "Not connected: message not sent",
-          description: "Reconnecting to the environment. Try again once it is connected.",
-        }),
-        id: `chat-send-environment-unavailable:${toastSlot}`,
-      });
+      notifyEnvironmentUnavailable();
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();

@@ -9,7 +9,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import { AsyncResult } from "effect/reactivity";
 import { type EnvironmentId, type ProjectIconOverride } from "@t3tools/contracts";
@@ -26,7 +26,11 @@ import {
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { useThreadShells, waitForProjectRemoval } from "../../state/entities";
+import {
+  readProjectThreadRefs,
+  useThreadShells,
+  waitForProjectRemoval,
+} from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -316,7 +320,7 @@ function ProjectDetail({
     const api = readLocalApi();
     if (!api) return;
 
-    const { projectThreads, isWholeGroup, confirmationMessage } = planProjectRemoval({
+    const { isWholeGroup, confirmationMessage } = planProjectRemoval({
       members,
       groupMemberCount: group.memberProjects.length,
       hasOtherMembers,
@@ -332,9 +336,8 @@ function ProjectDetail({
     const draftStore = useComposerDraftStore.getState();
     for (const member of members) {
       if (checkProjectAccess([member], "Failed to remove project")) return;
-      const memberThreads = projectThreads.filter(
-        (thread) => thread.environmentId === member.environmentId && thread.projectId === member.id,
-      );
+      const projectRef = scopeProjectRef(member.environmentId, member.id);
+      const memberThreadRefs = readProjectThreadRefs(projectRef);
       const result = mapAtomCommandResult(
         await deleteProject({
           environmentId: member.environmentId,
@@ -349,12 +352,8 @@ function ProjectDetail({
         reportFailure(`Failed to remove "${member.title}"`, result);
         return;
       }
-      const projectRef = scopeProjectRef(member.environmentId, member.id);
       await waitForProjectRemoval(projectRef);
-      releaseProjectDraftUploads(
-        projectRef,
-        memberThreads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
-      );
+      releaseProjectDraftUploads(projectRef, memberThreadRefs);
       const projectDraftThread = draftStore.getDraftThreadByProjectRef(projectRef);
       if (projectDraftThread) {
         draftStore.clearDraftThread(projectDraftThread.draftId);

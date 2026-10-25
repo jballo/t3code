@@ -77,6 +77,27 @@ running the send button shows which action it will take. Long-press it to use th
 other action for a single message, or hold `Cmd` while sending from a hardware
 keyboard. The button only offers Steer when the running agent supports it.
 
+## Ask a side question
+
+Type `/btw` followed by a question to ask about the thread without interrupting it.
+The agent keeps working. The answer appears in a card above the composer, drawn from
+the conversation as it is right now, including the turn still in progress. Nothing
+from the side question enters the thread's own context.
+
+A side question can read the workspace but never changes it. **Fork** on the card
+turns the answer into an ordinary thread when you want to act on it. **Dismiss**
+hides the card without losing anything, and a bare `/btw` brings it back and walks
+through earlier questions. The trash icon deletes the question you're looking at.
+Deleting the thread deletes its side questions; a forked one stays.
+
+Side questions are text only. While the composer holds attachments or context,
+including a large paste that became an attachment, `/btw` is not sent.
+
+The command palette has **Ask a side question**, and `thread.sideQuestion` in
+**Settings → Keybindings** binds a shortcut that puts `/btw ` at the start of the
+composer, so a draft you already typed becomes the question. Side questions are on
+web and desktop. Mobile does not show them yet.
+
 ## Queue messages offline on mobile
 
 Mobile keeps local copies of draft attachments, so you can preview them and queue

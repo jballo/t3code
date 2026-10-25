@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
+  OrchestrationV2Command,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -32,6 +33,7 @@ const decodeOrchestrationV2ProviderThread = Schema.decodeUnknownSync(Orchestrati
 const decodeOrchestrationV2ProviderCapabilities = Schema.decodeUnknownSync(
   OrchestrationV2ProviderCapabilities,
 );
+const decodeOrchestrationV2Command = Schema.decodeUnknownSync(OrchestrationV2Command);
 
 describe("orchestration V2 contracts", () => {
   it("decodes thread event types from a newer server as skippable items", () => {
@@ -305,6 +307,18 @@ describe("orchestration V2 contracts", () => {
       runtimePolicy: { enforcement: "native" },
     });
     expect(explicit.runtimePolicy).toEqual({ enforcement: "native" });
+  });
+
+  it("lets a metadata update promote a side chat but never make one", () => {
+    const update = (sideChat: boolean) => ({
+      type: "thread.metadata.update",
+      commandId: "command-side-chat",
+      threadId: "thread-1",
+      sideChat,
+    });
+
+    expect(decodeOrchestrationV2Command(update(false))).toMatchObject({ sideChat: false });
+    expect(() => decodeOrchestrationV2Command(update(true))).toThrow();
   });
 
   it.each(["  indented prompt\n", "\n \t\n"])(

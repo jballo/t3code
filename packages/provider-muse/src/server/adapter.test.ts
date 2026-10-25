@@ -524,6 +524,32 @@ describe("MuseAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("launches a read-only sandbox's host without workspace writes", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeMuse();
+      let disableWrite: boolean | undefined;
+      const harness = yield* makeHarness(
+        fake,
+        INSTANCE_ID,
+        undefined,
+        undefined,
+        undefined,
+        ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          ...runtimePolicy,
+          sandboxPolicy: { type: "readOnly" },
+        }),
+        {
+          createHost: async (options) => {
+            disableWrite = options.disableWrite;
+            return fake.host;
+          },
+        },
+      );
+      yield* startConversation(harness, fake);
+      assert.strictEqual(disableWrite, true);
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("pins Windows turns to Muse's verbatim root and starts Muse in the plain path", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeMuse();
@@ -1221,6 +1247,47 @@ describe("MuseAdapterV2", () => {
         "runtime_request.updated",
         (event) => event.runtimeRequest.status === "resolved",
       );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("cancels a declined question in Muse instead of answering it", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeMuse();
+      const harness = yield* makeHarness(fake);
+      const { nativeId } = yield* startConversation(harness, fake);
+      yield* fake.emit("userInput/requested", {
+        userInputId: "question-1",
+        turnId: nativeId,
+        questions: [
+          {
+            id: "approach",
+            header: "Approach",
+            question: "Which approach?",
+            options: [{ label: "Small" }],
+            selection: { mode: "single" },
+          },
+        ],
+      });
+      const pending = yield* harness.takeEvent(
+        "runtime_request.updated",
+        (event) => event.runtimeRequest.kind === "user_input",
+      );
+      yield* harness.runtime.respondToRuntimeRequest({
+        requestId: pending.runtimeRequest.id,
+        decision: "decline",
+      });
+      const cancel = yield* fake.takeCall("userInput/cancel");
+      assert.strictEqual(cancel.params.userInputId, "question-1");
+      assert.isFalse(fake.calls.some((call) => call.method === "userInput/answer"));
+      yield* fake.emit("userInput/settled", { userInputId: "question-1", turnId: nativeId });
+      const settled = yield* harness.takeEvent(
+        "runtime_request.updated",
+        (event) => event.runtimeRequest.status !== "pending",
+      );
+      assert.strictEqual(settled.runtimeRequest.decision, "decline");
+      yield* fake.emit("turn/completed", { turnId: nativeId, terminal: "completed" });
+      const terminal = yield* harness.takeEvent("turn.terminal");
+      assert.strictEqual(terminal.status, "completed");
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 

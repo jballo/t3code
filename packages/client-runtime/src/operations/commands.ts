@@ -76,6 +76,9 @@ export interface CreateThreadInput extends CommandMetadata {
   readonly interactionMode: ProviderInteractionMode;
   readonly branch: string | null;
   readonly worktreePath: string | null;
+  /** Link under an existing thread without transferring any of its context. */
+  readonly parentThreadId?: ThreadId;
+  readonly sideChat?: boolean;
 }
 
 export interface ThreadCommandInput extends CommandMetadata {
@@ -127,6 +130,8 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly expectedEmpty?: boolean;
+  /** Promotes a side chat to an ordinary thread. */
+  readonly sideChat?: false;
 }
 
 export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
@@ -403,6 +408,8 @@ export const createThread = Effect.fn("EnvironmentCommands.createThread")(functi
     interactionMode: input.interactionMode,
     branch: input.branch,
     worktreePath: input.worktreePath,
+    ...(input.parentThreadId === undefined ? {} : { parentThreadId: input.parentThreadId }),
+    ...(input.sideChat === undefined ? {} : { sideChat: input.sideChat }),
   });
 });
 
@@ -564,6 +571,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.worktreePath !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
+      input.sideChat !== undefined ||
       input.limitRecovery !== undefined
     ) {
       result = yield* dispatch({
@@ -579,6 +587,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.linkedPullRequest === undefined
           ? {}
           : { linkedPullRequest: input.linkedPullRequest }),
+        ...(input.sideChat === undefined ? {} : { sideChat: input.sideChat }),
       });
     }
     if (input.modelSelection !== undefined) {

@@ -109,6 +109,7 @@ export interface CursorAgentSdkLoggedAgentOptions {
   readonly model?: AgentOptions["model"];
   readonly hasName?: boolean;
   readonly mode?: AgentOptions["mode"];
+  readonly tools?: AgentOptions["tools"];
   readonly local?: {
     readonly hasCwd?: boolean;
     readonly autoReview?: boolean;
@@ -256,6 +257,7 @@ export function loggedCursorAgentOptions(options: AgentOptions): CursorAgentSdkL
     ...(options.model === undefined ? {} : { model: options.model }),
     ...(options.name === undefined ? {} : { hasName: true }),
     ...(options.mode === undefined ? {} : { mode: options.mode }),
+    ...(options.tools === undefined ? {} : { tools: options.tools }),
     ...(options.local === undefined
       ? {}
       : {

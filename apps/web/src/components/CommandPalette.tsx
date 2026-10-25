@@ -61,11 +61,13 @@ import {
   MessageSquareIcon,
   PaletteIcon,
   RotateCcwIcon,
+  MessageCircleQuestionIcon,
   SettingsIcon,
   SquarePenIcon,
   TextSearchIcon,
 } from "lucide-react";
 import { requestThreadFindOpen } from "./chat/threadFindActionBus";
+import { requestSideQuestionPrefill } from "./chat/sideQuestionActionBus";
 import {
   useDeferredValue,
   useEffect,
@@ -112,7 +114,14 @@ import {
   useEnvironments,
   usePrimaryEnvironmentId,
 } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
+import {
+  useEnvironmentSupportsSideQuestions,
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+  waitForProject,
+} from "../state/entities";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
@@ -538,6 +547,12 @@ function OpenCommandPaletteDialog(props: {
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(referenceThreadRef);
   const activeThreadServerConfig = useServerConfigs().get(
     activeThread?.environmentId ?? ("" as EnvironmentId),
+  );
+  const sideQuestionsSupported = useEnvironmentSupportsSideQuestions(
+    activeThread?.environmentId ?? null,
+  );
+  const canAskSideQuestion = useAtomValue(
+    orchestrationEnvironment.askSideQuestion.permissionAtom(activeThread?.environmentId ?? null),
   );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
@@ -1310,6 +1325,27 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  if (
+    activeThread !== null &&
+    activeThread.sideChat !== true &&
+    sideQuestionsSupported &&
+    canAskSideQuestion
+  ) {
+    actionItems.push({
+      kind: "action",
+      value: "action:side-question",
+      searchTerms: ["btw", "side question", "ask", "aside", "quick question"],
+      title: "Ask a side question",
+      description: "Answered from this thread's context without interrupting it",
+      icon: <MessageCircleQuestionIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "thread.sideQuestion",
+      run: async () => {
+        setOpen(false);
+        requestSideQuestionPrefill();
+      },
     });
   }
 
